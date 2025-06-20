@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    /* CSS Variables for Design System */
+    :root {
+      --primary-blue: #2563eb;
+      --primary-blue-hover: #1d4ed8;
+      --primary-blue-light: #dbeafe;
+      --secondary-gray: #6b7280;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+      --success-green: #10b981;
+      --success-light: #d1fae5;
+      --error-red: #ef4444;
+      --error-light: #fee2e2;
+      --warning-orange: #f59e0b;
+      --warning-light: #fef3c7;
+      --danger-red: #dc2626;
+      --danger-light: #fecaca;
+      --border-radius: 8px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    }
+
+    /* Reset and Base Styles */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
+      color: var(--gray-900);
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    /* Main Container */
+    .app-container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: var(--shadow-lg);
+      width: 100%;
+      max-width: 480px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Header Section */
+    .header {
+      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-hover) 100%);
+      color: white;
+      padding: 32px 32px 24px;
+      text-align: center;
+      position: relative;
+    }
+
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
+      opacity: 0.3;
+    }
+
+    .logo-container {
+      position: relative;
+      z-index: 1;
+      margin-bottom: 16px;
+    }
+
+    .logo {
+      width: 48px;
+      height: 48px;
+      background: white;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }
+
+    .logo i {
+      font-size: 24px;
+      color: var(--primary-blue);
+    }
+
+    .app-title {
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0;
+      letter-spacing: -0.025em;
+      position: relative;
+      z-index: 1;
+    }
+
+    .app-subtitle {
+      font-size: 14px;
+      opacity: 0.9;
+      font-weight: 400;
+      margin-top: 4px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Content Section */
+    .content {
+      padding: 32px;
+    }
+
+    /* Form Elements */
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--gray-700);
+      margin-bottom: 8px;
+      letter-spacing: -0.025em;
+    }
+
+    .form-select {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid var(--gray-200);
+      border-radius: var(--border-radius);
+      font-size: 15px;
+      font-weight: 400;
+      background: white;
+      color: var(--gray-900);
+      transition: all 0.2s ease;
+      appearance: none;
+      background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20"><path stroke="%236b7280" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 8l4 4 4-4"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px;
+      cursor: pointer;
+    }
+
+    .form-select:focus {
+      outline: none;
+      border-color: var(--primary-blue);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .form-select:hover {
+      border-color: var(--gray-300);
+    }
+
+    .form-select:disabled {
+      background-color: var(--gray-50);
+      color: var(--gray-400);
+      cursor: not-allowed;
+    }
+
+    /* Button Container */
+    .button-container {
+      display: flex;
+      gap: 12px;
+      flex-direction: column;
+    }
+
+    /* Button Styles */
+    .btn {
+      padding: 14px 24px;
+      border: none;
+      border-radius: var(--border-radius);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      letter-spacing: -0.025em;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition: left 0.5s ease;
+    }
+
+    .btn:hover::before {
+      left: 100%;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn:disabled::before {
+      display: none;
+    }
+
+    .btn-primary {
+      width: 100%;
+      background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-hover) 100%);
+      color: white;
+    }
+
+    .btn-primary:disabled {
+      background: var(--gray-300);
+    }
+
+    .btn-danger {
+      width: 100%;
+      background: linear-gradient(135deg, var(--danger-red) 0%, #b91c1c 100%);
+      color: white;
+    }
+
+    .btn-danger:disabled {
+      background: var(--gray-300);
+    }
+
+    .btn-danger:hover {
+      background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+    }
+
+    /* Loading Spinner */
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top: 2px solid white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Status Messages */
+    .status-container {
+      margin-top: 24px;
+    }
+
+    .status-message {
+      padding: 16px;
+      border-radius: var(--border-radius);
+      font-size: 14px;
+      font-weight: 500;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      min-height: 52px;
+      transition: all 0.3s ease;
+    }
+
+    .status-info {
+      background: var(--primary-blue-light);
+      color: var(--primary-blue-hover);
+      border: 1px solid rgba(37, 99, 235, 0.2);
+    }
+
+    .status-success {
+      background: var(--success-light);
+      color: var(--success-green);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .status-error {
+      background: var(--error-light);
+      color: var(--error-red);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    .status-warning {
+      background: var(--warning-light);
+      color: var(--warning-orange);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .status-cancelled {
+      background: var(--danger-light);
+      color: var(--danger-red);
+      border: 1px solid rgba(220, 38, 38, 0.2);
+    }
+
+    .status-icon {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .status-text {
+      flex: 1;
+      line-height: 1.5;
+    }
+
+    /* Progress Bar */
+    .progress-container {
+      margin-top: 16px;
+      display: none;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gray-700);
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: var(--gray-200);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary-blue) 0%, var(--primary-blue-hover) 100%);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    /* Utility Classes */
+    .hidden {
+      display: none !important;
+    }
+
+    .text-center {
+      text-align: center;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 480px) {
+      .app-container {
+        margin: 0;
+        border-radius: 0;
+        min-height: 100vh;
+      }
+      
+      .content {
+        padding: 24px;
+      }
+      
+      .header {
+        padding: 24px 24px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header Section -->
+    <div class="header">
+      <div class="logo-container">
+        <div class="logo">
+          <i class="fas fa-download"></i>
+        </div>
+        <h1 class="app-title">Gmail Attachment</h1>
+        <p class="app-subtitle">Download attachments from Gmail labels to Drive</p>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+      <!-- Label Selection Form -->
+      <div class="form-group">
+        <label for="labelSelect" class="form-label">
+          <i class="fas fa-tag" style="margin-right: 6px;"></i>
+          Select Gmail Label
+        </label>
+        <select id="labelSelect" class="form-select">
+          <option value="">Loading labels...</option>
+        </select>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-container">
+        <button id="processBtn" class="btn btn-primary" disabled>
+          <i class="fas fa-play"></i>
+          <span>Start Processing</span>
+        </button>
+        
+        <button id="cancelBtn" class="btn btn-danger hidden">
+          <i class="fas fa-stop"></i>
+          <span>Cancel Process</span>
+        </button>
+      </div>
+
+      <!-- Progress Section -->
+      <div id="progressContainer" class="progress-container">
+        <div class="progress-label">
+          <span id="progressText">Processing...</span>
+          <span id="progressNumbers">0/0</span>
+        </div>
+        <div class="progress-bar">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+      </div>
+
+      <!-- Status Messages -->
+      <div id="statusContainer" class="status-container"></div>
+    </div>
+  </div>
+
+  <script>
+    // Global variables
+    let currentProcessToken = null;
+    let isProcessing = false;
+
+    // DOM Elements
+    const labelSelect = document.getElementById('labelSelect');
+    const processBtn = document.getElementById('processBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressText = document.getElementById('progressText');
+    const progressNumbers = document.getElementById('progressNumbers');
+    const progressFill = document.getElementById('progressFill');
+    const statusContainer = document.getElementById('statusContainer');
+
+    // Initialize the application
+    document.addEventListener('DOMContentLoaded', function() {
+      loadGmailLabels();
+      setupEventListeners();
+    });
+
+    // Setup event listeners
+    function setupEventListeners() {
+      labelSelect.addEventListener('change', function() {
+        processBtn.disabled = !this.value || isProcessing;
+      });
+
+      processBtn.addEventListener('click', function() {
+        if (!labelSelect.value || isProcessing) return;
+        startProcessing();
+      });
+
+      cancelBtn.addEventListener('click', function() {
+        if (currentProcessToken) {
+          cancelProcess();
+        }
+      });
+    }
+
+    // Load Gmail labels from the server
+    function loadGmailLabels() {
+      showStatus('info', 'Loading Gmail labels...', 'fas fa-spinner fa-spin');
+      
+      google.script.run
+        .withSuccessHandler(onLabelsLoaded)
+        .withFailureHandler(onLabelsError)
+        .getGmailLabels();
+    }
+
+    // Handle successful label loading
+    function onLabelsLoaded(labels) {
+      labelSelect.innerHTML = '<option value="">Select a label...</option>';
+      
+      if (labels && labels.length > 0) {
+        labels.forEach(label => {
+          const option = document.createElement('option');
+          option.value = label.value;
+          option.textContent = label.text;
+          labelSelect.appendChild(option);
+        });
+        hideStatus();
+      } else {
+        showStatus('warning', 'No Gmail labels found.', 'fas fa-exclamation-triangle');
+      }
+    }
+
+    // Handle label loading error
+    function onLabelsError(error) {
+      console.error('Error loading labels:', error);
+      showStatus('error', 'Failed to load Gmail labels. Please refresh and try again.', 'fas fa-exclamation-circle');
+      labelSelect.innerHTML = '<option value="">Error loading labels</option>';
+    }
+
+    // Start processing attachments
+    function startProcessing() {
+      if (isProcessing || !labelSelect.value) return;
+
+      const selectedLabel = labelSelect.value;
+      currentProcessToken = generateProcessToken();
+      isProcessing = true;
+
+      // Update UI state
+      processBtn.disabled = true;
+      processBtn.innerHTML = '<div class="spinner"></div><span>Processing...</span>';
+      cancelBtn.classList.remove('hidden');
+      labelSelect.disabled = true;
+      
+      // Show progress container
+      progressContainer.style.display = 'block';
+      updateProgress(0, 0, 'Initializing...');
+      
+      showStatus('info', `Starting to process attachments for label: ${selectedLabel}`, 'fas fa-play');
+
+      // Call the server function
+      google.script.run
+        .withSuccessHandler(onProcessComplete)
+        .withFailureHandler(onProcessError)
+        .processAttachments(selectedLabel, currentProcessToken);
+    }
+
+    // Cancel the current process
+    function cancelProcess() {
+      if (!currentProcessToken) return;
+
+      cancelBtn.disabled = true;
+      cancelBtn.innerHTML = '<div class="spinner"></div><span>Cancelling...</span>';
+      
+      showStatus('warning', 'Cancellation requested. Process will stop at the next safe checkpoint...', 'fas fa-clock');
+
+      google.script.run
+        .withSuccessHandler(onCancelComplete)
+        .withFailureHandler(onCancelError)
+        .cancelProcess(currentProcessToken);
+    }
+
+    // Handle process completion
+    function onProcessComplete(result) {
+      isProcessing = false;
+      resetUI();
+
+      if (result.status === 'success') {
+        showStatus('success', result.message, 'fas fa-check-circle');
+        updateProgress(100, 100, 'Complete!');
+      } else if (result.status === 'cancelled') {
+        showStatus('cancelled', result.message, 'fas fa-ban');
+      } else if (result.status === 'error') {
+        showStatus('error', result.message, 'fas fa-exclamation-circle');
+      }
+    }
+
+    // Handle process error
+    function onProcessError(error) {
+      console.error('Process error:', error);
+      isProcessing = false;
+      resetUI();
+      showStatus('error', 'An unexpected error occurred: ' + error.message, 'fas fa-exclamation-circle');
+    }
+
+    // Handle cancellation completion
+    function onCancelComplete(result) {
+      if (result.status === 'success') {
+        showStatus('cancelled', result.message, 'fas fa-ban');
+      } else {
+        showStatus('error', 'Failed to cancel process: ' + result.message, 'fas fa-exclamation-circle');
+      }
+      cancelBtn.disabled = false;
+      cancelBtn.innerHTML = '<i class="fas fa-stop"></i><span>Cancel Process</span>';
+    }
+
+    // Handle cancellation error
+    function onCancelError(error) {
+      console.error('Cancel error:', error);
+      showStatus('error', 'Error cancelling process: ' + error.message, 'fas fa-exclamation-circle');
+      cancelBtn.disabled = false;
+      cancelBtn.innerHTML = '<i class="fas fa-stop"></i><span>Cancel Process</span>';
+    }
+
+    // Update progress display
+    function updateProgress(current, total, message) {
+      if (total > 0) {
+        const percentage = Math.round((current / total) * 100);
+        progressFill.style.width = percentage + '%';
+        progressNumbers.textContent = `${current}/${total}`;
+        progressText.textContent = message || `Processing attachments... (${percentage}%)`;
+      } else {
+        progressFill.style.width = '0%';
+        progressNumbers.textContent = '0/0';
+        progressText.textContent = message || 'Initializing...';
+      }
+    }
+
+    // Show status message
+    function showStatus(type, message, iconClass) {
+      const statusDiv = document.createElement('div');
+      statusDiv.className = `status-message status-${type}`;
+      
+      statusDiv.innerHTML = `
+        <div class="status-icon">
+          <i class="${iconClass}"></i>
+        </div>
+        <div class="status-text">${message}</div>
+      `;
+      
+      statusContainer.innerHTML = '';
+      statusContainer.appendChild(statusDiv);
+    }
+
+    // Hide status message
+    function hideStatus() {
+      statusContainer.innerHTML = '';
+    }
+
+    // Reset UI to initial state
+    function resetUI() {
+      currentProcessToken = null;
+      isProcessing = false;
+      
+      processBtn.disabled = !labelSelect.value;
+      processBtn.innerHTML = '<i class="fas fa-play"></i><span>Start Processing</span>';
+      
+      cancelBtn.classList.add('hidden');
+      cancelBtn.disabled = false;
+      cancelBtn.innerHTML = '<i class="fas fa-stop"></i><span>Cancel Process</span>';
+      
+      labelSelect.disabled = false;
+      
+      // Hide progress after a delay to show final state
+      setTimeout(() => {
+        progressContainer.style.display = 'none';
+      }, 3000);
+    }
+
+    // Generate a unique process token
+    function generateProcessToken() {
+      return 'process_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    // Server-side progress callback (called from Google Apps Script)
+    function onProgressUpdate(current, total, labelName, processToken) {
+      if (processToken === currentProcessToken) {
+        updateProgress(current, total, `Processing ${labelName}...`);
+      }
+    }
+
+    // Make progress update function available globally for server calls
+    window.onProgressUpdate = onProgressUpdate;
+  </script>
+</body>
+</html>
