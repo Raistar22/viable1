@@ -377,7 +377,7 @@ function createFolderStructure(parentFolder, companyName, financialYear, month, 
     
     // Create or get month folder
     const monthFolder = getOrCreateFolder(financialYearFolder, month);
-    
+    dele
     // Create or get flow type folder (e.g., "January-inflow")
     const flowFolderName = `${month}-${flowType}`;
     const flowFolder = getOrCreateFolder(monthFolder, flowFolderName);
@@ -429,4 +429,41 @@ function doGet() {
  */
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Invoice Actions')
+    .addItem('Delete Selected Row', 'deleteSelectedRowWithReason')
+    .addToUi();
+}
+
+function deleteSelectedRowWithReason() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const ui = SpreadsheetApp.getUi();
+  const range = sheet.getActiveRange();
+  const row = range.getRow();
+
+  // Confirm deletion
+  const response = ui.alert('Delete Row', 'Do you want to delete this row?', ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) return;
+
+  // Ask for reason
+  const reasonPrompt = ui.prompt('Reason for Deletion', 'Please enter the reason for deleting this row:', ui.ButtonSet.OK_CANCEL);
+  if (reasonPrompt.getSelectedButton() !== ui.Button.OK) return;
+  const reason = reasonPrompt.getResponseText();
+
+  // Find or add "Delete Reason" column
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let reasonCol = headers.indexOf('Delete Reason') + 1;
+  if (reasonCol === 0) {
+    // Add new column at the end
+    reasonCol = headers.length + 1;
+    sheet.getRange(1, reasonCol).setValue('Delete Reason');
+  }
+
+  // Mark as deleted and add reason
+  sheet.getRange(row, reasonCol).setValue('Deleted: ' + reason);
+
+  // (Optional) You can also gray out the row or add a "Deleted" flag in another column if you wish
 }

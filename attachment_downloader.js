@@ -96,12 +96,19 @@ function processAttachments(labelName, processToken) {
   }
 
   let logSheet;
-  // New standard headers reflecting Drive metadata + original email context
-  const desiredHeaders = [
+  // Standard headers reflecting Drive metadata + original email context
+  const downloaderHeaders = [
     'File Name', 'File ID', 'File URL', 
     'Date Created (Drive)', 'Last Updated (Drive)', 'Size (bytes)', 'Mime Type',
     'Email Subject', 'Gmail Message ID','invoice status'
   ];
+  // Reroute.js compatible headers
+  const rerouteHeaders = [
+    'Date', 'Month', 'Vendor Name', 'Financial Year', 'Document Link',
+    'Document Number', 'Gross Amount', 'GST', 'TDS', 'Other Taxes', 'Net Amount', 'Redundant'
+  ];
+  // Combine all unique headers, preserving order: downloaderHeaders first, then any rerouteHeaders not already present
+  const allHeaders = downloaderHeaders.concat(rerouteHeaders.filter(h => !downloaderHeaders.includes(h)));
 
   try {
     logSheet = ss.getSheetByName(labelName);
@@ -112,46 +119,26 @@ function processAttachments(labelName, processToken) {
       Logger.log(`Created new sheet: ${labelName}`);
     }
 
-    // Check if headers need to be added or updated
-    let addHeaders = false;
-    if (logSheet.getLastRow() === 0) {
-      // Sheet is completely empty, definitely add headers
-      addHeaders = true;
-    } else {
-      // Sheet has data, check if first row matches desired headers
-      const firstRowRange = logSheet.getRange(1, 1, 1, desiredHeaders.length);
-      const firstRowValues = firstRowRange.getValues()[0];
-      
-      // Compare arrays (simple string comparison for equality)
-      if (firstRowValues.join(',') !== desiredHeaders.join(',')) {
-        addHeaders = true;
-        // Optionally, clear existing content if headers are truly malformed for a clean slate.
-        // logSheet.clearContents(); 
-        Logger.log(`Headers for '${labelName}' are incorrect or missing. Updating.`);
-      }
+    // Check if headers need to be added (add only missing headers, do not remove any)
+    let currentHeaders = [];
+    if (logSheet.getLastRow() > 0) {
+      const firstRowRange = logSheet.getRange(1, 1, 1, logSheet.getLastColumn());
+      currentHeaders = firstRowRange.getValues()[0];
     }
-
-    if (addHeaders) {
-      logSheet.getRange(1, 1, 1, desiredHeaders.length).setValues([desiredHeaders]);
-      
-      // Apply formatting to headers
-      const headerRange = logSheet.getRange(1, 1, 1, desiredHeaders.length);
+    // Add any missing headers from allHeaders
+    let headersToSet = currentHeaders.slice();
+    allHeaders.forEach(h => {
+      if (!headersToSet.includes(h)) headersToSet.push(h);
+    });
+    // Only set headers if there are new ones to add
+    if (headersToSet.length > currentHeaders.length) {
+      logSheet.getRange(1, 1, 1, headersToSet.length).setValues([headersToSet]);
+      // Optionally format new headers
+      const headerRange = logSheet.getRange(1, 1, 1, headersToSet.length);
       headerRange.setFontWeight('bold');
       headerRange.setBackground('#E8F0FE');
       headerRange.setBorder(true, true, true, true, true, true);
-      
       logSheet.setFrozenRows(1);
-      // Adjust column widths for new headers
-      logSheet.setColumnWidth(1, 200); // File Name
-      logSheet.setColumnWidth(2, 180); // File ID
-      logSheet.setColumnWidth(3, 250); // File URL
-      logSheet.setColumnWidth(4, 180); // Date Created (Drive)
-      logSheet.setColumnWidth(5, 180); // Last Updated (Drive)
-      logSheet.setColumnWidth(6, 120); // Size (bytes)
-      logSheet.setColumnWidth(7, 150); // Mime Type
-      logSheet.setColumnWidth(8, 300); // Email Subject
-      logSheet.setColumnWidth(9, 200); // Gmail Message ID
-      Logger.log(`Headers added/updated for sheet: ${labelName}`);
     }
 
   } catch (e) {
@@ -431,4 +418,217 @@ function updateProgress(current, total, labelName, processToken) {
   // it just serves as a target for google.script.run from the client
   // to allow the client to update its own UI.
   Logger.log(`Progress for ${labelName}: ${current}/${total} (Token: ${processToken})`);
+}
+
+/**
+ * Get all company names from sheet tabs (Reroute.js compatible)
+ * @return {Array} Array of company names
+ */
+function getCompanies() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = spreadsheet.getSheets();
+  const companies = [];
+  sheets.forEach(sheet => {
+    const sheetName = sheet.getName();
+    // Skip inflow/outflow/system sheets
+    if (!sheetName.includes(' - inflow') && !sheetName.includes(' - outflow') && sheetName !== 'Sheet1') {
+      companies.push(sheetName);
+    }
+  });
+  return companies.sort();
+}
+
+/**
+ * Flood file details and create inflow/outflow sheets (Reroute.js compatible)
+ * @param {string} companyName - Name of the company
+ * @return {Object} Success response
+ */
+function floodFileDetails(companyName) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const companySheet = spreadsheet.getSheetByName(companyName);
+    if (!companySheet) {
+      throw new Error(`Company sheet '${companyName}' not found`);
+    }
+    // Get data from company sheet
+    const data = companySheet.getDataRange().getValues();
+    const headers = data[0];
+    const rows = data.slice(1);
+    // Find required column indices
+    const fileNameIndex = headers.indexOf('File Name');
+    const fileUrlIndex = headers.indexOf('File URL');
+    const invoiceStatusIndex = headers.indexOf('invoice status');
+    if (fileNameIndex === -1 || fileUrlIndex === -1) {
+      throw new Error('Required columns (File Name, File URL) not found in company sheet');
+    }
+    // Process each file and categorize by invoice status
+    const inflowData = [];
+    const outflowData = [];
+    const seenInvoices = new Set();
+    const inflowRedundant = [];
+    const outflowRedundant = [];
+    rows.forEach(row => {
+      if (row[fileNameIndex]) {
+        const fileName = row[fileNameIndex];
+        const fileUrl = row[fileUrlIndex] || '';
+        const invoiceStatus = row[invoiceStatusIndex] || 'inflow';
+        const parsedData = parseFileName(fileName, fileUrl);
+        const vendorName = parsedData[2] || '';
+        const invoiceNumber = parsedData[5] || '';
+        const totalAmount = parsedData[10] || '';
+        const uniqueKey = invoiceNumber + '|' + vendorName + '|' + totalAmount;
+        if (seenInvoices.has(uniqueKey)) {
+          if (invoiceStatus.toLowerCase().includes('outflow')) {
+            outflowRedundant.push([...parsedData, 'Yes']);
+          } else {
+            inflowRedundant.push([...parsedData, 'Yes']);
+          }
+          return;
+        }
+        seenInvoices.add(uniqueKey);
+        if (invoiceStatus.toLowerCase().includes('outflow')) {
+          outflowData.push([...parsedData, 'No']);
+        } else {
+          inflowData.push([...parsedData, 'No']);
+        }
+      }
+    });
+    inflowData.push(...inflowRedundant);
+    outflowData.push(...outflowRedundant);
+    createOrUpdateFlowSheet(companyName + ' - inflow', inflowData);
+    createOrUpdateFlowSheet(companyName + ' - outflow', outflowData);
+    return {
+      success: true,
+      message: `Processed ${inflowData.length} inflow and ${outflowData.length} outflow records`
+    };
+  } catch (error) {
+    Logger.log('Error flooding file details: ' + error);
+    throw new Error('Failed to flood file details: ' + error.message);
+  }
+}
+
+/**
+ * Parse file name and extract relevant information (Reroute.js compatible)
+ * @param {string} fileName - File name in format Date_VendorName_InvoiceNumber_TotalAmount
+ * @param {string} fileUrl - File URL
+ * @return {Array} Parsed data array
+ */
+function parseFileName(fileName, fileUrl) {
+  try {
+    const parts = fileName.split('_');
+    if (parts.length < 4) {
+      return [
+        '', '', fileName, '', fileUrl, '', '', '', '', '', ''
+      ];
+    }
+    const date = parts[0];
+    const vendorName = parts[1];
+    const invoiceNumber = parts[2];
+    const totalAmount = parts[3].replace(/\.[^.]*$/, '');
+    const month = getMonthFromDate(date);
+    const financialYear = calculateFinancialYear(date);
+    return [
+      date, month, vendorName, financialYear, fileUrl, invoiceNumber, '', '', '', '', totalAmount
+    ];
+  } catch (error) {
+    Logger.log('Error parsing filename: ' + fileName + ' ' + error);
+    return [ '', '', fileName, '', fileUrl, '', '', '', '', '', '' ];
+  }
+}
+
+/**
+ * Get month name from date string (YYYY-MM-DD)
+ * @param {string} dateStr
+ * @return {string} Month name
+ */
+function getMonthFromDate(dateStr) {
+  try {
+    const date = new Date(dateStr);
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return months[date.getMonth()];
+  } catch (error) {
+    return '';
+  }
+}
+
+/**
+ * Calculate financial year from date (YYYY-MM-DD)
+ * @param {string} dateStr
+ * @return {string} Financial year in format YYYY-YYYY
+ */
+function calculateFinancialYear(dateStr) {
+  try {
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    if (month >= 4) {
+      return `${year}-${year + 1}`;
+    } else {
+      return `${year - 1}-${year}`;
+    }
+  } catch (error) {
+    return '';
+  }
+}
+
+/**
+ * Create or update flow sheet with data (Reroute.js compatible)
+ * @param {string} sheetName - Name of the sheet
+ * @param {Array} data - Data to populate
+ */
+function createOrUpdateFlowSheet(sheetName, data) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(sheetName);
+    } else {
+      sheet.clear();
+    }
+    const headers = [
+      'Date', 'Month', 'Vendor Name', 'Financial Year', 'Document Link',
+      'Document Number', 'Gross Amount', 'GST', 'TDS', 'Other Taxes', 'Net Amount', 'Redundant'
+    ];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setBackground('#4285f4');
+    headerRange.setFontColor('white');
+    headerRange.setFontWeight('bold');
+    if (data && data.length > 0) {
+      sheet.getRange(2, 1, data.length, headers.length).setValues(data);
+    }
+    sheet.autoResizeColumns(1, headers.length);
+  } catch (error) {
+    Logger.log('Error creating/updating flow sheet: ' + error);
+    throw error;
+  }
+}
+
+/**
+ * Shifts up all cells in the specified column if a cell is empty.
+ * @param {string} sheetName - The name of the sheet to operate on.
+ * @param {number} col - The 1-based column number to check (e.g., 1 for column A).
+ */
+function shiftUpIfCellEmpty(sheetName, col) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return; // No data
+
+  var values = sheet.getRange(2, col, lastRow - 1, 1).getValues(); // skip header
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] === "" || values[i][0] === null) {
+      // Shift up all cells below
+      for (var j = i + 1; j < values.length; j++) {
+        values[j - 1][0] = values[j][0];
+      }
+      values[values.length - 1][0] = ""; // Clear last cell
+      // Write back and exit (do one shift per call)
+      sheet.getRange(2, col, values.length, 1).setValues(values);
+      break;
+    }
+  }
 }
