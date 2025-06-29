@@ -1,840 +1,1058 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
-  <title>Drive File Renamer</title>
-  <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <style>
-    /* Reset and base styles */
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    
-    body {
-      font-family: 'Google Sans', -apple-system, sans-serif;
-      background: #f8f9fa;
-      color: #202124;
-      line-height: 1.4;
-      font-size: 13px;
-    }
+ <base target="_top">
+ <title>Drive File Renamer</title>
+ <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+ <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+ <style>
+   /* Reset and base styles */
+   * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+   body {
+     font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+     background: linear-gradient(120deg, #f8f9fa 60%, #e3eefd 100%);
+     color: #202124;
+     line-height: 1.5;
+     font-size: 14px;
+     min-height: 100vh;
+   }
 
-    .container {
-      padding: 16px;
-      max-width: 100%;
-    }
+   .container {
+     padding: 24px 8px 32px 8px;
+     max-width: 700px;
+     margin: 0 auto;
+   }
 
-    .header {
-      background: linear-gradient(135deg, #1a73e8, #1557b0);
-      color: white;
-      padding: 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      text-align: center;
-    }
+   .header {
+     background: linear-gradient(135deg, #1a73e8, #1557b0);
+     color: white;
+     padding: 24px 16px 20px 16px;
+     border-radius: 12px;
+     margin-bottom: 24px;
+     text-align: center;
+     box-shadow: 0 4px 24px 0 rgba(26,115,232,0.08);
+     position: relative;
+     overflow: hidden;
+   }
+   .header:after {
+     content: '';
+     position: absolute;
+     right: -40px; top: -40px;
+     width: 120px; height: 120px;
+     background: rgba(255,255,255,0.08);
+     border-radius: 50%;
+     z-index: 0;
+   }
+   .header h1 {
+     font-size: 22px;
+     font-weight: 600;
+     margin-bottom: 6px;
+     letter-spacing: 0.5px;
+     z-index: 1;
+     position: relative;
+   }
+   .header p {
+     font-size: 13px;
+     opacity: 0.93;
+     z-index: 1;
+     position: relative;
+   }
 
-    .header h1 {
-      font-size: 18px;
-      font-weight: 500;
-      margin-bottom: 4px;
-    }
-
-    .header p {
-      font-size: 12px;
-      opacity: 0.9;
-    }
-
-    .section {
-      background: white;
-      border: 1px solid #dadce0;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      overflow: hidden;
-    }
-
-    .section-header {
-      background: #f8f9fa;
-      padding: 12px 16px;
-      border-bottom: 1px solid #dadce0;
-      font-weight: 500;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .section-content {
-      padding: 16px;
-    }
-
-    .form-group {
-      margin-bottom: 12px;
-    }
-
-    .form-label {
-      display: block;
-      font-weight: 500;
-      margin-bottom: 6px;
-      font-size: 12px;
-      color: #5f6368;
-    }
-
-    .form-select, .form-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  font-size: 13px;
-  background: white;
-}
-
-.form-select:focus, .form-input:focus {
-  outline: none; /* Add or ensure this is present */
-  border-color: #1a73e8;
-  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1);
-}
-
-/* Also, if you added the specific rule for .status-dropdown:focus previously, keep it.
-   It helps to be explicit. */
-.status-dropdown:focus {
-  outline: none; /* Remove default outline */
-  border-color: #1a73e8; /* Keep your blue border color */
-  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1); /* Keep your subtle blue shadow */
-}
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-      width: 100%;
-      justify-content: center;
-    }
-
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    .btn-primary {
-      background: #1a73e8;
-      color: white;
-    }
-
-    .btn-primary:hover:not(:disabled) {
-      background: #1557b0;
-    }
-
-    .btn-success {
-      background: #34a853;
-      color: white;
-    }
-
-    .btn-warning {
-      background: #fbbc04;
-      color: #202124;
-    }
-
-    .btn-sm {
-      padding: 6px 12px;
-      font-size: 12px;
-      width: auto;
-    }
-
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 12px;
-      margin-top: 8px;
-    }
-
-    .status-success {
-      background: rgba(52, 168, 83, 0.1);
-      color: #34a853;
-      border: 1px solid rgba(52, 168, 83, 0.3);
-    }
-
-    .status-error {
-      background: rgba(234, 67, 53, 0.1);
-      color: #ea4335;
-      border: 1px solid rgba(234, 67, 53, 0.3);
-    }
-
-    .status-info {
-      background: rgba(26, 115, 232, 0.1);
-      color: #1a73e8;
-      border: 1px solid rgba(26, 115, 232, 0.3);
-    }
-
-    .stats {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-
-    .stat {
-      text-align: center;
-      flex: 1;
-    }
-
-    .stat-number {
-      font-size: 20px;
-      font-weight: 600;
-      color: #1a73e8;
-    }
-
-    .stat-label {
-      font-size: 11px;
-      color: #5f6368;
-    }
-
-    .file-item {
-      background: white;
-      border: 1px solid #dadce0;
-      border-radius: 6px;
-      margin-bottom: 12px;
-      overflow: hidden;
-    }
-
-    .file-item.processed {
-      background: rgba(52, 168, 83, 0.05);
-      border-color: rgba(52, 168, 83, 0.3);
-    }
-
-    .file-header {
-      padding: 12px;
-      background: #f8f9fa;
-      border-bottom: 1px solid #dadce0;
-    }
-
-    .file-name {
-      font-weight: 500;
-      font-size: 13px;
-      margin-bottom: 4px;
-      word-break: break-word;
-    }
-
-    .file-meta {
-      font-size: 11px;
-      color: #5f6368;
-    }
-
-    .file-content {
-      padding: 12px;
-    }
-
-    .reason-box {
-      background: rgba(251, 188, 4, 0.1);
-      border-left: 3px solid #fbbc04;
-      padding: 8px 12px;
-      margin-bottom: 12px;
-      font-size: 12px;
-    }
-
-    .ai-results {
-      background: #f8f9fa;
-      border-radius: 4px;
-      padding: 12px;
-      margin: 12px 0;
-    }
-
-    .data-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-
-    .data-label {
-      font-size: 11px;
-      color: #5f6368;
-      font-weight: 500;
-    }
-
-    .data-value {
-      font-size: 12px;
-      color: #202124;
-      font-weight: 500;
-    }
-
-    /* Styles for the editable filename input */
-    .filename-edit-group {
-      margin: 8px 0 12px 0;
-    }
-    
-    .filename-edit-label {
-      display: block;
-      font-weight: 500;
-      margin-bottom: 6px;
-      font-size: 12px;
-      color: #5f6368;
-    }
-
-  .filename-edit-input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  font-family: monospace; /* Monospaced font for filenames */
-  font-size: 11px;
-  word-break: break-all;
-  background: white;
-
-  /* Add or modify these properties for height */
-  height: auto; /* Allow height to adjust to content */
-  min-height: 40px; /* Set a minimum height for visibility */
-  resize: vertical; /* Allow vertical resizing by the user */
-  overflow-y: auto; /* Add scrollbar if content exceeds height */
-  white-space: pre-wrap; /* Ensures text wraps and maintains spaces/line breaks */
-}
-    
-    .filename-edit-input:focus {
-        outline: none;
-        border-color: #1a73e8;
-        box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1);
-    }
-
-    .action-row {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    
-    .action-row .btn {
-      flex: 1; /* Make buttons take equal width */
-    }
-
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(26, 115, 232, 0.2);
-      border-top: 2px solid #1a73e8;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 24px;
-      color: #5f6368;
-    }
-
-    .empty-state i {
-      font-size: 32px;
-      margin-bottom: 12px;
-      color: #dadce0;
-    }
-
-    .loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 16px;
-      color: #5f6368;
-      font-style: italic;
-    }
-
-    .confidence {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .confidence-bar {
-      flex: 1;
-      height: 4px;
-      background: #e0e0e0;
-      border-radius: 2px;
-      overflow: hidden;
-    }
-
-    .confidence-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #ea4335 0%, #fbbc04 50%, #34a853 100%);
-      transition: width 0.3s;
-    }
-    .invoice-status-group {
-  margin: 12px 0;
-  padding: 12px;
-  background: rgba(26, 115, 232, 0.05);
-  border-radius: 6px;
-  border: 1px solid rgba(26, 115, 232, 0.2);
-}
-
-.invoice-status-label {
-  display: block;
-  font-weight: 500;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: #1a73e8;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.status-inflow {
-  background: rgba(52, 168, 83, 0.1);
-  color: #34a853;
-  border: 1px solid rgba(52, 168, 83, 0.3);
-}
-
-.status-outflow {
-  background: rgba(234, 67, 53, 0.1);
-  color: #ea4335;
-  border: 1px solid rgba(234, 67, 53, 0.3);
-}
-
-.status-dropdown:focus {
-  outline: none; /* Remove default outline */
-  border-color: #1a73e8; /* Keep your blue border color */
-  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1); /* Keep your subtle blue shadow */
-}
-  </style>
+   .section {
+     background: white;
+     border: 1px solid #dadce0;
+     border-radius: 10px;
+     margin-bottom: 18px;
+     box-shadow: 0 2px 8px 0 rgba(60,64,67,0.04);
+     overflow: hidden;
+     transition: box-shadow 0.2s;
+   }
+   .section:hover {
+     box-shadow: 0 4px 16px 0 rgba(26,115,232,0.08);
+   }
+   .section-header {
+     background: #f4f8fd;
+     padding: 16px 20px;
+     border-bottom: 1px solid #dadce0;
+     font-weight: 600;
+     font-size: 15px;
+     display: flex;
+     align-items: center;
+     gap: 10px;
+     letter-spacing: 0.2px;
+   }
+   .section-content {
+     padding: 20px 20px 16px 20px;
+   }
+   .form-group {
+     margin-bottom: 18px;
+   }
+   .form-label {
+     display: block;
+     font-weight: 500;
+     margin-bottom: 7px;
+     font-size: 13px;
+     color: #5f6368;
+   }
+   .form-select, .form-input {
+     width: 100%;
+     padding: 8px 12px;
+     border: 1px solid #dadce0;
+     border-radius: 5px;
+     font-size: 14px;
+     background: white;
+     transition: border 0.2s, box-shadow 0.2s;
+   }
+   .form-select:focus, .form-input:focus {
+     outline: none;
+     border-color: #1a73e8;
+     box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.13);
+   }
+   /* Custom style for the Select Spreadsheet dropdown */
+   #sheetSelect {
+     appearance: none;
+     -webkit-appearance: none;
+     -moz-appearance: none;
+     background: linear-gradient(90deg, #f4f8fd 80%, #e3eefd 100%);
+     border: 1.5px solid #b6c6e3;
+     color: #1a237e;
+     font-weight: 600;
+     padding: 12px 40px 12px 16px;
+     border-radius: 7px;
+     box-shadow: 0 2px 8px 0 rgba(26,115,232,0.04);
+     cursor: pointer;
+     position: relative;
+     transition: border 0.2s, box-shadow 0.2s, background 0.2s;
+     outline: none;
+     margin-bottom: 8px;
+     min-width: 180px;
+     background-image: url('data:image/svg+xml;utf8,<svg fill="%231a73e8" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>');
+     background-repeat: no-repeat;
+     background-position: right 14px center;
+     background-size: 22px 22px;
+   }
+   #sheetSelect:focus, #sheetSelect:hover {
+     border-color: #1a73e8;
+     background: linear-gradient(90deg, #e3eefd 80%, #f4f8fd 100%);
+     box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.13);
+   }
+   #sheetSelect option {
+     color: #202124;
+     font-weight: 500;
+     background: #fff;
+   }
+   .btn {
+     display: inline-flex;
+     align-items: center;
+     gap: 7px;
+     padding: 10px 20px;
+     border: none;
+     border-radius: 5px;
+     font-size: 14px;
+     font-weight: 600;
+     cursor: pointer;
+     transition: all 0.18s;
+     width: 100%;
+     justify-content: center;
+     box-shadow: 0 2px 8px 0 rgba(26,115,232,0.04);
+     position: relative;
+   }
+   .btn:active {
+     transform: scale(0.98);
+   }
+   .btn:disabled {
+     opacity: 0.6;
+     cursor: not-allowed;
+   }
+   .btn-primary {
+     background: linear-gradient(90deg, #1a73e8 80%, #4285f4 100%);
+     color: white;
+     box-shadow: 0 2px 8px 0 rgba(26,115,232,0.08);
+   }
+   .btn-primary:hover:not(:disabled) {
+     background: linear-gradient(90deg, #1557b0 80%, #1a73e8 100%);
+   }
+   .btn-success {
+     background: linear-gradient(90deg, #34a853 80%, #43e97b 100%);
+     color: white;
+   }
+   .btn-success:hover:not(:disabled) {
+     background: linear-gradient(90deg, #2c8c47 80%, #34a853 100%);
+   }
+   .btn-warning {
+     background: linear-gradient(90deg, #fbbc04 80%, #ffe082 100%);
+     color: #202124;
+   }
+   .btn-warning:hover:not(:disabled) {
+     background: linear-gradient(90deg, #e2a800 80%, #fbbc04 100%);
+   }
+   .btn-sm {
+     padding: 7px 14px;
+     font-size: 13px;
+     width: auto;
+   }
+   .status {
+     display: flex;
+     align-items: center;
+     gap: 10px;
+     padding: 10px 16px;
+     border-radius: 5px;
+     font-size: 13px;
+     margin-top: 10px;
+     font-weight: 500;
+     box-shadow: 0 1px 4px 0 rgba(60,64,67,0.04);
+   }
+   .status-success {
+     background: rgba(52, 168, 83, 0.13);
+     color: #34a853;
+     border: 1px solid rgba(52, 168, 83, 0.22);
+   }
+   .status-error {
+     background: rgba(234, 67, 53, 0.13);
+     color: #ea4335;
+     border: 1px solid rgba(234, 67, 53, 0.22);
+   }
+   .status-info {
+     background: rgba(26, 115, 232, 0.13);
+     color: #1a73e8;
+     border: 1px solid rgba(26, 115, 232, 0.22);
+   }
+   .status i {
+     font-size: 16px;
+   }
+   .stats {
+     display: flex;
+     justify-content: space-between;
+     margin-bottom: 18px;
+     gap: 12px;
+   }
+   .stat {
+     text-align: center;
+     flex: 1;
+     background: #f4f8fd;
+     border-radius: 8px;
+     padding: 12px 0 10px 0;
+     box-shadow: 0 1px 4px 0 rgba(26,115,232,0.04);
+     border: 1px solid #e3eefd;
+     transition: background 0.2s;
+   }
+   .stat-number {
+     font-size: 22px;
+     font-weight: 700;
+     color: #1a73e8;
+     margin-bottom: 2px;
+   }
+   .stat-label {
+     font-size: 12px;
+     color: #5f6368;
+     font-weight: 500;
+   }
+   .file-item {
+     background: white;
+     border: 1px solid #dadce0;
+     border-radius: 8px;
+     margin-bottom: 16px;
+     overflow: hidden;
+     box-shadow: 0 2px 8px 0 rgba(60,64,67,0.04);
+     transition: box-shadow 0.2s, border 0.2s;
+     position: relative;
+   }
+   .file-item.processed {
+     background: rgba(52, 168, 83, 0.07);
+     border-color: rgba(52, 168, 83, 0.22);
+   }
+   .file-item:hover {
+     box-shadow: 0 4px 16px 0 rgba(26,115,232,0.10);
+     border-color: #1a73e8;
+   }
+   .file-header {
+     padding: 16px 16px 10px 16px;
+     background: #f8f9fa;
+     border-bottom: 1px solid #dadce0;
+     display: flex;
+     flex-direction: column;
+     gap: 2px;
+   }
+   .file-name {
+     font-weight: 600;
+     font-size: 15px;
+     margin-bottom: 2px;
+     word-break: break-word;
+     color: #1a73e8;
+     display: flex;
+     align-items: center;
+     gap: 6px;
+   }
+   .file-meta {
+     font-size: 12px;
+     color: #5f6368;
+   }
+   .file-content {
+     padding: 16px 16px 18px 16px;
+   }
+   .reason-box {
+     background: rgba(251, 188, 4, 0.13);
+     border-left: 4px solid #fbbc04;
+     padding: 10px 14px;
+     margin-bottom: 14px;
+     font-size: 13px;
+     border-radius: 5px;
+     color: #a15c00;
+     box-shadow: 0 1px 4px 0 rgba(251,188,4,0.04);
+   }
+   .ai-results {
+     background: #f4f8fd;
+     border-radius: 6px;
+     padding: 16px 14px 10px 14px;
+     margin: 16px 0 0 0;
+     box-shadow: 0 1px 4px 0 rgba(26,115,232,0.04);
+     border: 1px solid #e3eefd;
+     animation: fadeIn 0.5s;
+   }
+   @keyframes fadeIn {
+     from { opacity: 0; transform: translateY(16px); }
+     to { opacity: 1; transform: translateY(0); }
+   }
+   .data-row {
+     display: flex;
+     justify-content: space-between;
+     margin-bottom: 8px;
+   }
+   .data-label {
+     font-size: 12px;
+     color: #5f6368;
+     font-weight: 500;
+   }
+   .data-value {
+     font-size: 13px;
+     color: #202124;
+     font-weight: 600;
+   }
+   .filename-edit-group {
+     margin: 10px 0 16px 0;
+   }
+   .filename-edit-label {
+     display: block;
+     font-weight: 500;
+     margin-bottom: 7px;
+     font-size: 13px;
+     color: #5f6368;
+   }
+   .filename-edit-input {
+     width: 100%;
+     padding: 10px 14px;
+     border: 1.5px solid #dadce0;
+     border-radius: 5px;
+     font-family: monospace;
+     font-size: 13px;
+     word-break: break-all;
+     background: white;
+     min-height: 40px;
+     resize: vertical;
+     overflow-y: auto;
+     white-space: pre-wrap;
+     transition: border 0.2s, box-shadow 0.2s;
+   }
+   .filename-edit-input:focus {
+     outline: none;
+     border-color: #1a73e8;
+     box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.13);
+   }
+   .action-row {
+     display: flex;
+     gap: 10px;
+     margin-top: 16px;
+   }
+   .action-row .btn {
+     flex: 1;
+   }
+   .spinner {
+     width: 18px;
+     height: 18px;
+     border: 2.5px solid rgba(26, 115, 232, 0.18);
+     border-top: 2.5px solid #1a73e8;
+     border-radius: 50%;
+     animation: spin 1s linear infinite;
+   }
+   @keyframes spin {
+     0% { transform: rotate(0deg); }
+     100% { transform: rotate(360deg); }
+   }
+   .empty-state {
+     text-align: center;
+     padding: 32px 12px;
+     color: #5f6368;
+   }
+   .empty-state i {
+     font-size: 38px;
+     margin-bottom: 14px;
+     color: #dadce0;
+   }
+   .loading {
+     display: flex;
+     align-items: center;
+     justify-content: center;
+     gap: 10px;
+     padding: 20px;
+     color: #5f6368;
+     font-style: italic;
+   }
+   .confidence {
+     display: flex;
+     align-items: center;
+     gap: 10px;
+     margin-bottom: 10px;
+   }
+   .confidence-bar {
+     flex: 1;
+     height: 5px;
+     background: #e0e0e0;
+     border-radius: 3px;
+     overflow: hidden;
+   }
+   .confidence-fill {
+     height: 100%;
+     background: linear-gradient(90deg, #ea4335 0%, #fbbc04 50%, #34a853 100%);
+     transition: width 0.3s;
+   }
+   .invoice-status-group {
+     margin: 16px 0 10px 0;
+     padding: 14px 12px;
+     background: rgba(26, 115, 232, 0.07);
+     border-radius: 7px;
+     border: 1.5px solid rgba(26, 115, 232, 0.18);
+   }
+   .invoice-status-label {
+     display: block;
+     font-weight: 600;
+     margin-bottom: 10px;
+     font-size: 13px;
+     color: #1a73e8;
+   }
+   .status-badge {
+     display: inline-flex;
+     align-items: center;
+     gap: 5px;
+     padding: 5px 12px;
+     border-radius: 14px;
+     font-size: 12px;
+     font-weight: 600;
+   }
+   .status-inflow {
+     background: rgba(52, 168, 83, 0.13);
+     color: #34a853;
+     border: 1px solid rgba(52, 168, 83, 0.22);
+   }
+   .status-outflow {
+     background: rgba(234, 67, 53, 0.13);
+     color: #ea4335;
+     border: 1px solid rgba(234, 67, 53, 0.22);
+   }
+   .status-dropdown:focus {
+     outline: none;
+     border-color: #1a73e8;
+     box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.13);
+   }
+   /* Responsive adjustments */
+   @media (max-width: 600px) {
+     .container {
+       padding: 8px 2px 16px 2px;
+     }
+     .section-content, .file-content, .file-header {
+       padding-left: 8px;
+       padding-right: 8px;
+     }
+     .header {
+       padding: 16px 4px 14px 4px;
+     }
+   }
+ </style>
 </head>
 <body>
-  <div class="container">
-    <header class="header">
-      <h1><i class="fas fa-file-signature"></i> Drive File Renamer</h1>
-      <p>AI-powered document renaming for Drive</p>
-    </header>
+ <div class="container">
+   <header class="header">
+     <h1><i class="fas fa-file-signature"></i> Drive File Renamer</h1>
+     <p>AI-powered document renaming for Drive</p>
+   </header>
 
-    <div class="section">
-      <div class="section-header">
-        <i class="fas fa-table"></i>
-        Select Spreadsheet
-      </div>
-      <div class="section-content">
-        <div class="form-group">
-          <select id="sheetSelect" class="form-select">
-            <option value="">Loading sheets...</option>
-          </select>
-        </div>
-        <button id="loadFilesBtn" class="btn btn-primary">
-          <i class="fas fa-search"></i>
-          Analyze Files
-        </button>
-        <div id="loadStatus"></div>
-      </div>
-    </div>
 
-    <div class="section" id="processingSection" style="display: none;">
-      <div class="section-header">
-        <i class="fas fa-cogs"></i>
-        Processing Files
-      </div>
-       <div id="statsBar" class="stats">
-          <div class="stat">
-            <div class="stat-number" id="totalCount">0</div>
-            <div class="stat-label">Total</div>
-          </div>
-          <div class="stat">
-            <div class="stat-number" id="processedCount">0</div>
-            <div class="stat-label">Processed</div>
-          </div>
-          <div class="stat">
-            <div class="stat-number" id="renamedCount">0</div>
-            <div class="stat-label">Renamed</div>
-          </div>
-        </div>
+   <div class="section">
+     <div class="section-header">
+       <i class="fas fa-table"></i>
+       Select Spreadsheet
+     </div>
+     <div class="section-content">
+       <div class="form-group" style="position: relative;">
+         <label id="sheetSelectLabel" for="sheetSelect" class="form-label" style="display: block; margin-bottom: 7px; font-size: 15px; color: #1a73e8; font-weight: 600; transition: color 0.2s;">Select Spreadsheet</label>
+         <select id="sheetSelect" class="form-select">
+           <option value="">Loading sheets...</option>
+         </select>
+       </div>
+       <button id="loadFilesBtn" class="btn btn-primary">
+         <i class="fas fa-search"></i>
+         Analyze Files
+       </button>
+       <div id="loadStatus"></div>
+     </div>
+   </div>
+
+
+   <div class="section" id="processingSection" style="display: none;">
+     <div class="section-header">
+       <i class="fas fa-cogs"></i>
+       Processing Files
+     </div>
+      <div id="statsBar" class="stats">
+         <div class="stat">
+           <div class="stat-number" id="totalCount">0</div>
+           <div class="stat-label">Total</div>
+         </div>
+         <div class="stat">
+           <div class="stat-number" id="processedCount">0</div>
+           <div class="stat-label">Processed</div>
+         </div>
+         <div class="stat">
+           <div class="stat-number" id="renamedCount">0</div>
+           <div class="stat-label">Renamed</div>
+         </div>
+       </div>
 </div>
-        </div>
+       </div>
+      
+       <div id="filesContainer">
+         <div class="empty-state">
+           <i class="fas fa-folder-open"></i>
+           <h3>No files to process</h3>
+           <p>Select a spreadsheet and analyze files</p>
+         </div>
+       </div>
+     </div>
+   </div>
+ </div>
+
+
+ <script>
+   const elements = {
+     sheetSelect: document.getElementById('sheetSelect'),
+     loadFilesBtn: document.getElementById('loadFilesBtn'),
+     loadStatus: document.getElementById('loadStatus'),
+     processingSection: document.getElementById('processingSection'),
+     filesContainer: document.getElementById('filesContainer'),
+     totalCount: document.getElementById('totalCount'),
+     processedCount: document.getElementById('processedCount'),
+     renamedCount: document.getElementById('renamedCount'),
+     sheetSelectLabel: document.getElementById('sheetSelectLabel')
+   };
+
+
+   let currentSheet = '';
+   let files = []; // Stores the file data loaded from the sheet
+   let stats = { total: 0, processed: 0, renamed: 0 };
+
+
+   function showStatus(message, type = 'info', container = elements.loadStatus) {
+     const icons = { success: 'check-circle', error: 'exclamation-circle', info: 'info-circle' };
+     container.innerHTML = `
+       <div class="status status-${type}">
+         <i class="fas fa-${icons[type]}"></i>
+         ${message}
+       </div>
+     `;
+   }
+
+
+function updateStats() {
+     elements.totalCount.textContent = stats.total;
+     elements.processedCount.textContent = stats.processed;
+     elements.renamedCount.textContent = stats.renamed;
+   }
+
+
+   // Load spreadsheets
+   google.script.run
+     .withSuccessHandler(sheetNames => {
+       elements.sheetSelect.innerHTML = '<option value="">-- Select Spreadsheet --</option>';
+       if (sheetNames.length > 0) {
+           sheetNames.forEach(name => {
+               const option = document.createElement('option');
+               option.value = option.textContent = name;
+               elements.sheetSelect.appendChild(option);
+           });
+           showStatus('Spreadsheets loaded successfully.', 'success');
+       } else {
+           showStatus('No spreadsheets found or accessible.', 'info');
+       }
+       // Always show the label, and if a sheet is selected, show its name above
+       elements.sheetSelect.addEventListener('change', function() {
+         const selected = elements.sheetSelect.value;
+         if (selected) {
+           elements.sheetSelectLabel.textContent = selected;
+           elements.sheetSelectLabel.style.color = '#1557b0';
+         } else {
+           elements.sheetSelectLabel.textContent = 'Select Spreadsheet';
+           elements.sheetSelectLabel.style.color = '#1a73e8';
+         }
+       });
+     })
+     .withFailureHandler(error => {
+       elements.sheetSelect.innerHTML = '<option value="">Error loading sheets</option>';
+       showStatus('Failed to load spreadsheets: ' + error.message, 'error');
+     })
+     .getSubsheetNamesGAS();
+
+
+   // Load files for processing
+   elements.loadFilesBtn.addEventListener('click', () => {
+     currentSheet = elements.sheetSelect.value;
+     if (!currentSheet) {
+       showStatus('Please select a spreadsheet.', 'error');
+       return;
+     }
+
+
+     elements.loadFilesBtn.disabled = true;
+     elements.loadFilesBtn.innerHTML = '<div class="spinner"></div> Analyzing...';
+     elements.filesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing files...</div>';
+     elements.processingSection.style.display = 'block'; // Show processing section immediately
+
+
+     window.autoProcessAfterAnalysis = true;
+     google.script.run
+       .withSuccessHandler(fileList => {
+         elements.loadFilesBtn.disabled = false;
+         elements.loadFilesBtn.innerHTML = '<i class="fas fa-search"></i> Analyze Files';
         
-        <div id="filesContainer">
-          <div class="empty-state">
-            <i class="fas fa-folder-open"></i>
-            <h3>No files to process</h3>
-            <p>Select a spreadsheet and analyze files</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const elements = {
-      sheetSelect: document.getElementById('sheetSelect'),
-      loadFilesBtn: document.getElementById('loadFilesBtn'),
-      loadStatus: document.getElementById('loadStatus'),
-      processingSection: document.getElementById('processingSection'),
-      filesContainer: document.getElementById('filesContainer'),
-      totalCount: document.getElementById('totalCount'),
-      processedCount: document.getElementById('processedCount'),
-      renamedCount: document.getElementById('renamedCount')
-    };
-
-    let currentSheet = '';
-    let files = []; // Stores the file data loaded from the sheet
-    let stats = { total: 0, processed: 0, renamed: 0 };
-
-    function showStatus(message, type = 'info', container = elements.loadStatus) {
-      const icons = { success: 'check-circle', error: 'exclamation-circle', info: 'info-circle' };
-      container.innerHTML = `
-        <div class="status status-${type}">
-          <i class="fas fa-${icons[type]}"></i>
-          ${message}
-        </div>
-      `;
-    }
-
- function updateStats() {
-      elements.totalCount.textContent = stats.total;
-      elements.processedCount.textContent = stats.processed;
-      elements.renamedCount.textContent = stats.renamed;
-    }
-
-    // Load spreadsheets
-    google.script.run
-      .withSuccessHandler(sheetNames => {
-        elements.sheetSelect.innerHTML = '<option value="">-- Select Spreadsheet --</option>';
-        if (sheetNames.length > 0) {
-            sheetNames.forEach(name => {
-                const option = document.createElement('option');
-                option.value = option.textContent = name;
-                elements.sheetSelect.appendChild(option);
-            });
-            showStatus('Spreadsheets loaded successfully.', 'success');
-        } else {
-            showStatus('No spreadsheets found or accessible.', 'info');
-        }
-      })
-      .withFailureHandler(error => {
-        elements.sheetSelect.innerHTML = '<option value="">Error loading sheets</option>';
-        showStatus('Failed to load spreadsheets: ' + error.message, 'error');
-      })
-      .getSubsheetNamesGAS();
-
-    // Load files for processing
-    elements.loadFilesBtn.addEventListener('click', () => {
-      currentSheet = elements.sheetSelect.value;
-      if (!currentSheet) {
-        showStatus('Please select a spreadsheet.', 'error');
-        return;
-      }
-
-      elements.loadFilesBtn.disabled = true;
-      elements.loadFilesBtn.innerHTML = '<div class="spinner"></div> Analyzing...';
-      elements.filesContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing files...</div>';
-      elements.processingSection.style.display = 'block'; // Show processing section immediately
-
-      google.script.run
-        .withSuccessHandler(fileList => {
-          elements.loadFilesBtn.disabled = false;
-          elements.loadFilesBtn.innerHTML = '<i class="fas fa-search"></i> Analyze Files';
-          
-          files = fileList;
+         files = fileList;
 stats = { total: fileList.length, processed: 0, renamed: 0 };
 updateStats();
-          
-          if (fileList.length === 0) {
-            elements.filesContainer.innerHTML = `
-              <div class="empty-state">
-                <i class="fas fa-check-circle"></i>
-                <h3>All files properly named</h3>
-                <p>No files need renaming in the selected sheet.</p>
-              </div>
-            `;
-            showStatus('No files need processing.', 'info');
-          } else {
-            displayFiles(fileList);
-          showStatus(`Found ${fileList.length} files to process.`, 'success'); 
-          }
-        })
-        .withFailureHandler(error => {
-          elements.loadFilesBtn.disabled = false;
-          elements.loadFilesBtn.innerHTML = '<i class="fas fa-search"></i> Analyze Files';
-          showStatus('Error analyzing files: ' + error.message, 'error');
-          elements.filesContainer.innerHTML = `
-            <div class="empty-state">
-              <i class="fas fa-exclamation-triangle"></i>
-              <h3>Error loading files</h3>
-              <p>${error.message}</p>
-            </div>
-          `;
-        })
-        .loadFilesForProcessingGAS(currentSheet);
-    });
+        
+         if (fileList.length === 0) {
+           elements.filesContainer.innerHTML = `
+             <div class="empty-state">
+               <i class="fas fa-check-circle"></i>
+               <h3>All files properly named</h3>
+               <p>No files need renaming in the selected sheet.</p>
+             </div>
+           `;
+           showStatus('No files need processing.', 'info');
+         } else {
+           displayFiles(fileList);
+         showStatus(`Found ${fileList.length} files to process.`, 'success');
+         }
+       })
+       .withFailureHandler(error => {
+         elements.loadFilesBtn.disabled = false;
+         elements.loadFilesBtn.innerHTML = '<i class="fas fa-search"></i> Analyze Files';
+         showStatus('Error analyzing files: ' + error.message, 'error');
+         elements.filesContainer.innerHTML = `
+           <div class="empty-state">
+             <i class="fas fa-exclamation-triangle"></i>
+             <h3>Error loading files</h3>
+             <p>${error.message}</p>
+           </div>
+         `;
+       })
+       .loadFilesForProcessingGAS(currentSheet);
+   });
 
-    function displayFiles(fileList) {
-      elements.filesContainer.innerHTML = ''; // Clear previous files
 
-      fileList.forEach((file, index) => {
-        const fileDiv = document.createElement('div');
-        fileDiv.className = 'file-item';
+   function displayFiles(fileList) {
+     elements.filesContainer.innerHTML = ''; // Clear previous files
+
+
+     fileList.forEach((file, index) => {
+       const fileDiv = document.createElement('div');
+       fileDiv.className = 'file-item';
 fileDiv.id = `file-${index}`;
-        
-        fileDiv.innerHTML = `
-          <div class="file-header">
-            <div class="file-name">${file.originalName}</div>
-            <div class="file-meta">
-  Row: ${file.sheetRow} • 
-  MIME: ${file.mimeType.split('/')[1].toUpperCase()}
+      
+       fileDiv.innerHTML = `
+         <div class="file-header">
+           <div class="file-name">${file.originalName}</div>
+           <div class="file-meta">
+ Row: ${file.sheetRow} •
+ MIME: ${file.mimeType.split('/')[1].toUpperCase()}
 </div>
-          </div>
-          <div class="file-content" id="content-${index}">
-            <div class="reason-box">
-  <strong>Needs Processing:</strong><br>
-  ${file.validationResult.reason}. 
-  Details: ${file.validationResult.details}
+         </div>
+         <div class="file-content" id="content-${index}">
+           <div class="reason-box">
+ <strong>Needs Processing:</strong><br>
+ ${file.validationResult.reason}.
+ Details: ${file.validationResult.details}
 </div>
-            <div class="action-row" style="margin-bottom: 12px;">
-                <button onclick="window.open('${file.fileUrl}', '_blank')" class="btn btn-warning btn-sm">
-                    <i class="fas fa-eye"></i> Preview
-                </button>
-                <button onclick="processFile(${index})" class="btn btn-primary btn-sm" id="processBtn-${index}">
-                    <i class="fas fa-robot"></i> Process with AI
-                </button>
-            </div>
-            <div id="status-${index}"></div>
-          </div>
-        `;
-        
-        elements.filesContainer.appendChild(fileDiv);
-      });
-    }
-     function generateInvoiceStatusUI(invoiceStatus, index) {
-      // Always return the select dropdown
-      // Set the 'selected' attribute based on the AI's detected status
-      const inflowSelected = invoiceStatus === 'inflow' ? 'selected' : '';
-      const outflowSelected = invoiceStatus === 'outflow' ? 'selected' : '';
+           <div class="action-row" style="margin-bottom: 12px;">
+               <button onclick="window.open('${file.fileUrl}', '_blank')" class="btn btn-warning btn-sm">
+                   <i class="fas fa-eye"></i> Preview
+               </button>
+               <button onclick="processFile(${index})" class="btn btn-primary btn-sm" id="processBtn-${index}">
+                   <i class="fas fa-robot"></i> Process with AI
+               </button>
+           </div>
+           <div id="status-${index}"></div>
+         </div>
+       `;
+      
+       elements.filesContainer.appendChild(fileDiv);
+     });
 
-      return `<select id="invoiceStatusSelect-${index}" class="status-dropdown">
-                <option value="" ${(!inflowSelected && !outflowSelected) ? 'selected' : ''}>-- Select Status --</option>
-                <option value="inflow" ${inflowSelected}>Inflow</option>
-                <option value="outflow" ${outflowSelected}>Outflow</option>
-              </select>`;
-    }
+     // If automation is enabled, start auto-processing all files
+     if (window.autoProcessAfterAnalysis) {
+       autoProcessAllFiles();
+     }
+   }
+    function generateInvoiceStatusUI(invoiceStatus, index) {
+     // Always return the select dropdown
+     // Set the 'selected' attribute based on the AI's detected status
+     const inflowSelected = invoiceStatus === 'inflow' ? 'selected' : '';
+     const outflowSelected = invoiceStatus === 'outflow' ? 'selected' : '';
+
+
+     return `<select id="invoiceStatusSelect-${index}" class="status-dropdown">
+               <option value="" ${(!inflowSelected && !outflowSelected) ? 'selected' : ''}>-- Select Status --</option>
+               <option value="inflow" ${inflowSelected}>Inflow</option>
+               <option value="outflow" ${outflowSelected}>Outflow</option>
+             </select>`;
+   }
 function getInvoiceStatus(index) {
-  const selectElement = document.getElementById(`invoiceStatusSelect-${index}`);
-  if (selectElement) {
-    return selectElement.value;
-  }
-  
+ const selectElement = document.getElementById(`invoiceStatusSelect-${index}`);
+ if (selectElement) {
+   return selectElement.value;
+ }
   // Check if it's a fixed status badge
-  const container = document.getElementById(`invoiceStatusContainer-${index}`);
-  const badge = container.querySelector('.status-badge');
-  if (badge) {
-    return badge.classList.contains('status-inflow') ? 'inflow' : 'outflow';
-  }
-  
+ const container = document.getElementById(`invoiceStatusContainer-${index}`);
+ const badge = container.querySelector('.status-badge');
+ if (badge) {
+   return badge.classList.contains('status-inflow') ? 'inflow' : 'outflow';
+ }
   return '';
 }
 
 
-    async function processFile(index) {
-      const file = files[index];
-      const statusDiv = document.getElementById(`status-${index}`);
-      const processBtn = document.getElementById(`processBtn-${index}`);
-      const contentDiv = document.getElementById(`content-${index}`);
+
+
+   async function processFile(index) {
+     const file = files[index];
+     const statusDiv = document.getElementById(`status-${index}`);
+     const processBtn = document.getElementById(`processBtn-${index}`);
+     const contentDiv = document.getElementById(`content-${index}`);
+    
+     // Disable both buttons in the action-row during processing
+     const actionRow = contentDiv.querySelector('.action-row');
+     Array.from(actionRow.children).forEach(btn => btn.disabled = true);
+
+
+     processBtn.innerHTML = '<div class="spinner"></div> Processing...';
+     showStatus('Processing with AI...', 'info', statusDiv);
+
+
+     try {
+       const aiData = await new Promise((resolve, reject) => {
+         google.script.run
+           .withSuccessHandler(resolve)
+           .withFailureHandler(reject)
+           .processFileWithAIGAS(file.fileId, file.originalName, file.mimeType, file.fileUrl);
+       });
+
+
+       if (aiData.error) {
+         showStatus(`AI Error: ${aiData.error}`, 'error', statusDiv);
+         // Re-enable original buttons if processing failed
+         Array.from(actionRow.children).forEach(btn => btn.disabled = false);
+         processBtn.innerHTML = '<i class="fas fa-robot"></i> Retry';
+         return;
+       }
+
+
+       file.aiData = aiData; // Store for automation
+       const newFilename = await new Promise((resolve, reject) => {
+         google.script.run
+           .withSuccessHandler(resolve)
+           .withFailureHandler(reject)
+           .generateNewFilename(aiData, file.originalName);
+       });
+
+
+       showStatus('AI extraction completed.', 'success', statusDiv);
       
-      // Disable both buttons in the action-row during processing
-      const actionRow = contentDiv.querySelector('.action-row');
-      Array.from(actionRow.children).forEach(btn => btn.disabled = true);
+       // Calculate confidence percentage if it's a string like "High (Gemini 2.0 Flash)"
+       let confidenceDisplay = aiData.confidence || "N/A";
+       let confidenceWidth = 0;
+       if (typeof confidenceDisplay === 'string') {
+           if (confidenceDisplay.toLowerCase().includes('high')) confidenceWidth = 100;
+           else if (confidenceDisplay.toLowerCase().includes('medium')) confidenceWidth = 60;
+           else if (confidenceDisplay.toLowerCase().includes('low')) confidenceWidth = 30;
+           // Remove text after parenthesis if present
+           confidenceDisplay = confidenceDisplay.split('(')[0].trim();
+       } else if (typeof confidenceDisplay === 'number') {
+            confidenceWidth = confidenceDisplay; // If it's already a number
+            confidenceDisplay = `${confidenceDisplay}%`;
+       }
+      
 
-      processBtn.innerHTML = '<div class="spinner"></div> Processing...';
-      showStatus('Processing with AI...', 'info', statusDiv);
 
-      try {
-        const aiData = await new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(reject)
-            .processFileWithAIGAS(file.fileId, file.originalName, file.mimeType, file.fileUrl);
-        });
-
-        if (aiData.error) {
-          showStatus(`AI Error: ${aiData.error}`, 'error', statusDiv);
-          // Re-enable original buttons if processing failed
-          Array.from(actionRow.children).forEach(btn => btn.disabled = false);
-          processBtn.innerHTML = '<i class="fas fa-robot"></i> Retry';
-          return;
-        }
-
-        const newFilename = await new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(reject)
-            .generateNewFilename(aiData, file.originalName);
-        });
-
-        showStatus('AI extraction completed.', 'success', statusDiv);
-        
-        // Calculate confidence percentage if it's a string like "High (Gemini 2.0 Flash)"
-        let confidenceDisplay = aiData.confidence || "N/A";
-        let confidenceWidth = 0;
-        if (typeof confidenceDisplay === 'string') {
-            if (confidenceDisplay.toLowerCase().includes('high')) confidenceWidth = 100;
-            else if (confidenceDisplay.toLowerCase().includes('medium')) confidenceWidth = 60;
-            else if (confidenceDisplay.toLowerCase().includes('low')) confidenceWidth = 30;
-            // Remove text after parenthesis if present
-            confidenceDisplay = confidenceDisplay.split('(')[0].trim();
-        } else if (typeof confidenceDisplay === 'number') {
-             confidenceWidth = confidenceDisplay; // If it's already a number
-             confidenceDisplay = `${confidenceDisplay}%`;
-        }
-        
-
-        // Remove the original action row and replace content with AI results
-        actionRow.remove(); 
-        
+       // Remove the original action row and replace content with AI results
+       actionRow.remove();
+      
 contentDiv.innerHTML += `
-  <div class="ai-results">
-    <div class="confidence">
-      <span class="data-label">AI Confidence:</span>
-      <div class="confidence-bar">
-        <div class="confidence-fill" style="width: ${confidenceWidth}%;"></div>
-      </div>
-      <span class="data-value">${confidenceDisplay}</span>
-    </div>
-    
-    <div class="data-row">
-      <span class="data-label">DATE:</span>
-      <span class="data-value">${aiData.date || 'N/A'}</span>
-    </div>
-    <div class="data-row">
-      <span class="data-label">VENDOR:</span>
-      <span class="data-value">${aiData.vendorName || 'N/A'}</span>
-    </div>
-    <div class="data-row">
-      <span class="data-label">INVOICE:</span>
-      <span class="data-value">${aiData.invoiceNumber || 'N/A'}</span>
-    </div>
-    <div class="data-row">
-      <span class="data-label">AMOUNT:</span>
-      <span class="data-value">${aiData.amount || 'N/A'}</span>
-    </div>
-    
-    <div class="invoice-status-group">
-      <label class="invoice-status-label">Invoice Status:</label>
-      <div id="invoiceStatusContainer-${index}">
-        ${generateInvoiceStatusUI(aiData.invoiceStatus, index)}
-      </div>
+ <div class="ai-results">
+   <div class="confidence">
+     <span class="data-label">AI Confidence:</span>
+     <div class="confidence-bar">
+       <div class="confidence-fill" style="width: ${confidenceWidth}%;"></div>
+     </div>
+     <span class="data-value">${confidenceDisplay}</span>
+   </div>
+  
+   <div class="data-row">
+     <span class="data-label">DATE:</span>
+     <span class="data-value">${aiData.date || 'N/A'}</span>
+   </div>
+   <div class="data-row">
+     <span class="data-label">VENDOR:</span>
+     <span class="data-value">${aiData.vendorName || 'N/A'}</span>
+   </div>
+   <div class="data-row">
+     <span class="data-label">INVOICE:</span>
+     <span class="data-value">${aiData.invoiceNumber || 'N/A'}</span>
+   </div>
+   <div class="data-row">
+     <span class="data-label">AMOUNT:</span>
+     <span class="data-value">${aiData.amount || 'N/A'}</span>
+   </div>
+  
+   <div class="invoice-status-group">
+     <label class="invoice-status-label">Invoice Status:</label>
+     <div id="invoiceStatusContainer-${index}">
+       ${generateInvoiceStatusUI(aiData.invoiceStatus, index)}
+     </div>
 
-      <div class="invoices-row">
-      <span class="data-label">NO_OF_INVOICES</span>
-      <span class="data-value">${aiData.numberofinvoices || 'N/A'}</span>
-    </div>
-    </div>
-    
-    <div class="form-group filename-edit-group">
-      <label for="newFilenameInput-${index}" class="filename-edit-label">Suggested New Filename:</label>
-      <input type="text" id="newFilenameInput-${index}" class="filename-edit-input"
-       value="${newFilename.replace(/"/g, '&quot;')}"
-       placeholder="DATE_VENDOR_INVOICE_AMOUNT" />
-    </div>
-    
-    <div class="action-row">
-      <button onclick="window.open('${file.fileUrl}', '_blank')" class="btn btn-warning">
-        <i class="fas fa-eye"></i> Preview
-      </button>
-      <button onclick="renameFile(${index})"
-              class="btn btn-success" id="renameBtn-${index}">
-        <i class="fas fa-file-signature"></i> Rename File
-      </button>
-    </div>
-    <div id="renameStatus-${index}"></div>
-  </div>
+
+     <div class="invoices-row">
+     <span class="data-label">NO_OF_INVOICES</span>
+     <span class="data-value">${aiData.numberofinvoices || 'N/A'}</span>
+   </div>
+   </div>
+  
+   <div class="form-group filename-edit-group">
+     <label for="newFilenameInput-${index}" class="filename-edit-label">Suggested New Filename:</label>
+     <input type="text" id="newFilenameInput-${index}" class="filename-edit-input"
+      value="${newFilename.replace(/"/g, '&quot;')}"
+      placeholder="DATE_VENDOR_INVOICE_AMOUNT" />
+   </div>
+  
+   <div class="action-row">
+     <button onclick="window.open('${file.fileUrl}', '_blank')" class="btn btn-warning">
+       <i class="fas fa-eye"></i> Preview
+     </button>
+     <button onclick="renameFile(${index})"
+             class="btn btn-success" id="renameBtn-${index}">
+       <i class="fas fa-file-signature"></i> Rename File
+     </button>
+   </div>
+   <div id="renameStatus-${index}"></div>
+ </div>
 `;
-        stats.processed++;
-        updateStats();
+       stats.processed++;
+       updateStats();
 
-      } catch (error) {
-        showStatus(`Processing failed: ${error.message}`, 'error', statusDiv);
-        // Re-add and re-enable original buttons if processing failed
-        contentDiv.innerHTML = `
-            <div class="reason-box">
-              <strong>Needs Processing:</strong><br>
-              ${file.validationResult.reason}. 
-              Details: ${file.validationResult.details}
-            </div>
-            <div class="action-row" style="margin-bottom: 12px;">
-                <button onclick="window.open('${file.fileUrl}', '_blank')" class="btn btn-warning btn-sm">
-                    <i class="fas fa-eye"></i> Preview
-                </button>
-                <button onclick="processFile(${index})" class="btn btn-primary btn-sm" id="processBtn-${index}">
-                    <i class="fas fa-robot"></i> Retry
-                </button>
-            </div>
-            <div id="status-${index}"></div>
-        `;
-      }
-    }
 
-    async function renameFile(index) {
-      const file = files[index];
-      const newNameInput = document.getElementById(`newFilenameInput-${index}`);
-      const newName = newNameInput.value; // Get the value from the input field
-      
-      const renameBtn = document.getElementById(`renameBtn-${index}`);
-      const previewBtn = renameBtn.previousElementSibling; // Get the preview button
+     } catch (error) {
+       showStatus(`Processing failed: ${error.message}`, 'error', statusDiv);
+       // Re-add and re-enable original buttons if processing failed
+       contentDiv.innerHTML = `
+           <div class="reason-box">
+             <strong>Needs Processing:</strong><br>
+             ${file.validationResult.reason}.
+             Details: ${file.validationResult.details}
+           </div>
+           <div class="action-row" style="margin-bottom: 12px;">
+               <button onclick="window.open('${file.fileUrl}', '_blank')" class="btn btn-warning btn-sm">
+                   <i class="fas fa-eye"></i> Preview
+               </button>
+               <button onclick="processFile(${index})" class="btn btn-primary btn-sm" id="processBtn-${index}">
+                   <i class="fas fa-robot"></i> Retry
+               </button>
+           </div>
+           <div id="status-${index}"></div>
+       `;
+     }
+   }
 
-      const statusDiv = document.getElementById(`renameStatus-${index}`);
-      const fileDiv = document.getElementById(`file-${index}`);
-      
-      renameBtn.disabled = true;
-      previewBtn.disabled = true; // Disable preview during rename
-      renameBtn.innerHTML = '<div class="spinner"></div> Renaming...';
-      showStatus('Renaming file...', 'info', statusDiv);
-      const invoiceStatus = getInvoiceStatus(index);
-if (!invoiceStatus) {
-  showStatus('Please select invoice status before renaming.', 'error', statusDiv);
-  renameBtn.disabled = false;
-  previewBtn.disabled = false;
-  renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Rename File';
-  return;
-}
 
-      try {
-        const result = await new Promise((resolve, reject) => {
-  const invoiceStatus = getInvoiceStatus(index);
-  google.script.run
-    .withSuccessHandler(resolve)
-    .withFailureHandler(reject)
-    .renameFileAndUpdateSheetGAS(file.fileId, newName, currentSheet, file.sheetRow, 1, invoiceStatus);
-});
+   async function renameFile(index) {
+     const file = files[index];
+     const newNameInput = document.getElementById(`newFilenameInput-${index}`);
+     const newName = newNameInput.value; // Get the value from the input field
+    
+     const renameBtn = document.getElementById(`renameBtn-${index}`);
+     const previewBtn = renameBtn.previousElementSibling; // Get the preview button
 
-        if (result.success) {
-          showStatus(`File renamed successfully!`, 'success', statusDiv);
-          fileDiv.classList.add('processed'); // Highlight as processed
-          fileDiv.querySelector('.file-name').innerHTML = `<i class="fas fa-check-circle" style="color: #34a853;"></i> ${newName}`;
-          renameBtn.innerHTML = '<i class="fas fa-check"></i> Renamed';
-          renameBtn.disabled = true;
-          newNameInput.disabled = true; // Disable editing after rename
-          previewBtn.disabled = true; // Keep preview disabled as file is processed
-          
-          stats.renamed++;
-          updateStats();
-        } else {
-          showStatus(`Rename failed: ${result.message}`, 'error', statusDiv);
-          renameBtn.disabled = false;
-          previewBtn.disabled = false; // Re-enable preview if rename failed
-          renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Retry';
-        }
-      } catch (error) {
-        showStatus(`Rename error: ${error.message}`, 'error', statusDiv);
-        renameBtn.disabled = false;
-        previewBtn.disabled = false; // Re-enable preview if rename failed
-        renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Retry';
-      }
-    }
-  </script>
+
+     const statusDiv = document.getElementById(`renameStatus-${index}`);
+     const fileDiv = document.getElementById(`file-${index}`);
+    
+     renameBtn.disabled = true;
+     previewBtn.disabled = true; // Disable preview during rename
+     renameBtn.innerHTML = '<div class="spinner"></div> Renaming...';
+     showStatus('Renaming file...', 'info', statusDiv);
+     const aiData = file.aiData || {};
+     const invoiceStatus = aiData.invoiceStatus;
+     if (!(invoiceStatus === 'inflow' || invoiceStatus === 'outflow')) {
+      showStatus('AI did not extract a valid invoice status (inflow/outflow). Please check the document or try again.', 'error', statusDiv);
+      renameBtn.disabled = false;
+      previewBtn.disabled = false;
+      renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Rename File';
+      return;
+     }
+     if (typeof newName === 'string' && newName.startsWith('ERROR_GENERATED_NAME')) {
+      showStatus('AI did not extract enough information to generate a valid filename. Please check the document or try again.', 'error', statusDiv);
+      renameBtn.disabled = false;
+      previewBtn.disabled = false;
+      renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Rename File';
+      return;
+     }
+
+
+     try {
+       // Always use backend to generate the filename
+       const result = await new Promise((resolve, reject) => {
+         google.script.run
+           .withSuccessHandler(resolve)
+           .withFailureHandler(reject)
+           .renameFileAndUpdateSheetGAS(file.fileId, newName, currentSheet, file.sheetRow, 1, invoiceStatus);
+       });
+
+
+       if (result.success) {
+         showStatus(`File renamed successfully!`, 'success', statusDiv);
+         fileDiv.classList.add('processed'); // Highlight as processed
+         fileDiv.querySelector('.file-name').innerHTML = `<i class="fas fa-check-circle" style="color: #34a853;"></i> ${newName}`;
+         renameBtn.innerHTML = '<i class="fas fa-check"></i> Renamed';
+         renameBtn.disabled = true;
+         newNameInput.disabled = true; // Disable editing after rename
+         previewBtn.disabled = true; // Keep preview disabled as file is processed
+        
+         stats.renamed++;
+         updateStats();
+       } else {
+         showStatus(`Rename failed: ${result.message}`, 'error', statusDiv);
+         renameBtn.disabled = false;
+         previewBtn.disabled = false; // Re-enable preview if rename failed
+         renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Retry';
+       }
+     } catch (error) {
+       showStatus(`Rename error: ${error.message}`, 'error', statusDiv);
+       renameBtn.disabled = false;
+       previewBtn.disabled = false; // Re-enable preview if rename failed
+       renameBtn.innerHTML = '<i class="fas fa-file-signature"></i> Retry';
+     }
+   }
+
+   // Automatically process all files after analysis
+   function autoProcessAllFiles() {
+     let index = 0;
+     function processNext() {
+       if (index >= files.length) {
+         showCompletionMessage();
+         return;
+       }
+       const file = files[index];
+       const fileDiv = document.getElementById(`file-${index}`);
+       const contentDiv = document.getElementById(`content-${index}`);
+       const statusDiv = document.getElementById(`status-${index}`) || contentDiv;
+       // Simulate clicking the Process with AI button
+       processFile(index).then(() => {
+         // After AI analysis, get the suggested new filename and invoice status
+         setTimeout(async () => {
+           const aiResults = contentDiv.querySelector('.ai-results');
+           if (aiResults) {
+             const newNameInput = contentDiv.querySelector('.filename-edit-input');
+             const invoiceStatusSelect = contentDiv.querySelector('.status-dropdown');
+             if (invoiceStatusSelect) {
+               const invoiceStatus = invoiceStatusSelect.value;
+               if (invoiceStatus && (invoiceStatus === 'inflow' || invoiceStatus === 'outflow')) {
+                 showStatus('Auto-renaming file...', 'info', statusDiv);
+                 // Always use backend to generate the filename
+                 const aiData = files[index].aiData || {};
+                 let newName;
+                 try {
+                   newName = await new Promise((resolve, reject) => {
+                     google.script.run
+                       .withSuccessHandler(resolve)
+                       .withFailureHandler(reject)
+                       .generateNewFilename(aiData, file.originalName);
+                   });
+                 } catch (error) {
+                   showStatus('Error generating filename: ' + error.message, 'error', statusDiv);
+                   if (renameBtn) renameBtn.disabled = false;
+                   if (previewBtn) previewBtn.disabled = false;
+                   index++;
+                   processNext();
+                   return;
+                 }
+                 if (typeof newName === 'string' && newName.startsWith('ERROR_GENERATED_NAME')) {
+                   showStatus('AI did not extract enough information to generate a valid filename. Skipping this file.', 'error', statusDiv);
+                   if (renameBtn) renameBtn.disabled = false;
+                   if (previewBtn) previewBtn.disabled = false;
+                   index++;
+                   processNext();
+                   return;
+                 }
+                 try {
+                   const result = await new Promise((resolve, reject) => {
+                     google.script.run
+                       .withSuccessHandler(resolve)
+                       .withFailureHandler(reject)
+                       .renameFileAndUpdateSheetGAS(file.fileId, newName, currentSheet, file.sheetRow, 1, invoiceStatus);
+                   });
+                   if (result.success) {
+                     showStatus('File auto-renamed and moved!', 'success', statusDiv);
+                     fileDiv.classList.add('processed');
+                     fileDiv.querySelector('.file-name').innerHTML = `<i class="fas fa-check-circle" style="color: #34a853;"></i> ${newName}`;
+                     if (renameBtn) {
+                       renameBtn.innerHTML = '<i class="fas fa-check"></i> Renamed';
+                       renameBtn.disabled = true;
+                     }
+                     if (previewBtn) previewBtn.disabled = true;
+                     stats.renamed++;
+                     updateStats();
+                   } else {
+                     showStatus('Auto-rename failed: ' + result.message, 'error', statusDiv);
+                     if (renameBtn) renameBtn.disabled = false;
+                     if (previewBtn) previewBtn.disabled = false;
+                   }
+                 } catch (error) {
+                   showStatus('Auto-rename error: ' + error.message, 'error', statusDiv);
+                   if (renameBtn) renameBtn.disabled = false;
+                   if (previewBtn) renameBtn.disabled = false;
+                 }
+               } else {
+                 showStatus('AI did not return a valid invoice status.', 'error', statusDiv);
+                 index++;
+                 processNext();
+                 return;
+               }
+             }
+           }
+           index++;
+           processNext();
+         }, 500); // Small delay to allow UI update
+       });
+     }
+     processNext();
+   }
+
+   // Add a function to show a completion message in the sidebar
+   function showCompletionMessage() {
+     let completionDiv = document.getElementById('completionStatus');
+     if (!completionDiv) {
+       completionDiv = document.createElement('div');
+       completionDiv.id = 'completionStatus';
+       completionDiv.style.margin = '18px 0 0 0';
+       elements.processingSection.parentNode.insertBefore(completionDiv, elements.processingSection.nextSibling);
+     }
+     completionDiv.innerHTML = `<div class="status status-success"><i class="fas fa-check-circle"></i> All files have been processed and moved!</div>`;
+   }
+ </script>
 </body>
 </html>
