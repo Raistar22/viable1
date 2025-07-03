@@ -1,17 +1,10 @@
+// this driveRenamer.js can handle renaming of the multiple vendors and multiple invoices
+
 // ----- Backend Functions called from HTML -----
 
 
 // Add this constant at the top of your script
 const GEMINI_MODEL_ID_AIS = "gemini-2.0-flash"; // Updated to use Gemini 2.0 Flash
-
-
-// Add this at the top, after GEMINI_MODEL_ID_AIS
-const COMPANY_FOLDER_MAP = {
-  "analogy-inflow": "16TBONm8cCzedQBqsjCIAbkVRbB-eD8EV",
-  "analogy-outflow": "1tK-OTIyxB7M8p4NuoV6jetNc9EH-4n9B",
-  "humane-inflow": "1zMhX0M4_FGWSFaqj-AvixN60r7nBkh4Q",
-  "humane-outflow": "1ZttP84E1Lrqptdi6kEpg7WMUTzl55SKB"
-};
 
 
 // Enhanced regex pattern for stricter naming convention validation
@@ -284,11 +277,18 @@ function processFileWithAIGAS(fileId, originalName, mimeType, fileUrl) {
  console.log(`Starting AI processing for file ID: ${fileId}, Name: "${originalName}", MIME: ${mimeType}`);
  let previewData = { type: 'unsupported', content: 'Preview not available for this file type.' };
  let base64Content = null;
+ let ocrText = '';
 
 
  try {
    const file = DriveApp.getFileById(fileId);
    const blob = file.getBlob();
+
+
+   // OCR for images and PDFs
+   if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
+     ocrText = extractTextWithOCR(fileId);
+   }
 
 
    // Prepare preview data for frontend
@@ -313,8 +313,8 @@ function processFileWithAIGAS(fileId, originalName, mimeType, fileUrl) {
    }
 
 
-   // Call Gemini API
-   const extractedInfo = callGeminiAPIInternal(blob, originalName, base64Content);
+   // Call Gemini API, passing OCR text
+   const extractedInfo = callGeminiAPIInternal(blob, originalName, base64Content, ocrText);
 
 
    if (extractedInfo.error) {
@@ -530,7 +530,7 @@ function sanitizeFilename(filename) {
 * @param {string|null} preEncodedBase64 Optional: Pre-encoded base64 string of the file.
 * @returns {Object} An object containing extracted data or an error message.
 */
-function callGeminiAPIInternal(fileBlob, fileName, preEncodedBase64) {
+function callGeminiAPIInternal(fileBlob, fileName, preEncodedBase64, ocrText) {
  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
  if (!apiKey) {
    console.error("Gemini API Key not found in User Properties. Please set 'GEMINI_API_KEY' in Project Settings -> Script Properties.");
@@ -564,127 +564,188 @@ function callGeminiAPIInternal(fileBlob, fileName, preEncodedBase64) {
  const fileBytesBase64 = preEncodedBase64 || Utilities.base64Encode(fileBlob.getBytes());
 
 
- const promptText = `
-You are a document analysis AI system specialized in processing invoices and billing documents. Analyze the attached file (PDF or image) and extract the following key data fields accurately and consistently:
-
-
-Return your output as a valid JSON object with exactly the following keys:
-{
- "date": "YYYY-MM-DD",
- "invoiceNumber": "string",
- "vendorName": "string",
- "amount": "string",
- "invoiceStatus": "inflow | outflow | unknown",
- "numberofinvoices": "integer"
-}
-
-
-Field-Specific Extraction Rules:
-
-
-1. "date":
-- Extract the main invoice or bill date.
-- Look for terms such as "Invoice Date", "Bill Date", "Date Issued", etc.
-- Convert all formats to YYYY-MM-DD.
-- If multiple dates are present, prioritize the one closest to the invoice title or header.
-
-
-2. "invoiceNumber":
-- Look for labels like "Invoice #", "Bill #", "Reference #", "Ref #", etc.
-- Clean the extracted value: retain only alphanumerics, hyphens, periods, ampersands, and spaces. Remove underscores or slashes.
-
-
-3. "vendorName":
-- Extract the name of the seller or issuer of the invoice.
-- Typically located at the top of the document or labeled as "From", "Issued by", "Vendor", or part of the company logo/header.
-- Clean the result: remove special characters except alphanumerics, periods, hyphens, ampersands, and spaces.
-
-
-4. "amount":
-- Extract the final amount payable or due.
-- Prioritize values near labels such as "Total", "Amount Due", "Grand Total", or "Balance Due".
-- Include currency symbol (e.g., ₹, $, €), and format as a plain string (e.g., "₹1025.50").
-- Avoid commas in numbers (e.g., use "₹1025.50", not "₹1,025.50").
-
-
-5. "invoiceStatus":
-- Determine the nature of the invoice using the following rules:
-
-• If any of these keywords or contextual clues appear, set as "inflow":
-  "Invoice From", "Billed By", "Supplier", "Vendor", "Issued By", "Service Provider", "Seller", "Sender" (when not your company), 
-  "Tax Invoice" (typically from supplier), "Supplier Address", "Supplier Name", "Invoice No." + supplier name at top,
-  "Account Payable", "GSTIN of Supplier", "You are being charged", "Total Due", "Amount Payable", "Due Date", 
-  "Terms: Net X Days", "Amount to Pay", "Payable To", "Make payment to", "Purchase Order No", "Invoice Received", "Bill Received"
-
-  Contextual clues:
-  - Your organization appears under "To", "Bill To", "Buyer", "Recipient"
-  - Supplier/Vendor details are prominently listed under "From", "Issued By"
-  - Mentions of input tax credit (ITC) eligibility
-  - PO number issued from your side
-  - References to overdue or upcoming payments
-
-• If any of these keywords or contextual clues appear, set as "outflow":
-  "Invoice To", "Bill To", "Billed To", "Sold To", "Consignee", "Dispatch To", "Shipped To", "Ship To", "Deliver To", 
-  "Customer", "Receiver", "Beneficiary", "Buyer", "Party to be billed", "Recipient", "Destination", 
-  "TO" (as in "To: XYZ Ltd."), "Consignment Note", "Sender's Copy", "Shipping Note", "Acknowledgement", 
-  "Issued By" (if your company), "Sender", "Consignor", "Our Invoice", "Our Ref No", "Order Fulfillment", "Order Dispatch", 
-  "E-Way Bill", "AWB No", "Tracking No", "Declared Value", "Courier", "Freight", "Delivery Note"
-
-  Contextual clues:
-  - Your company appears under "From", "Issued By", or sender's name
-  - Document involves shipping or dispatch initiated by your org
-  - Courier or logistics terms are present (e.g., DTDC, BlueDart, AWB)
-  - Line items describe goods or services *you are sending/providing*
-  - Contains shipment details like weight, number of pieces, or consignee info
-
-• If neither set of clues is found, return "unknown".
-
-
-6. "numberofinvoices":
-- Estimate the number of distinct invoice or billing documents present in the file — especially across multi-page PDFs.
-
-
-- Use structural and contextual cues to count invoices, including:
- • The appearance of multiple unique invoice numbers, e.g., more than one "Invoice #", "Ref #", or "Bill #" with different values.
- • Repeated structured patterns: headers like "Invoice Date", "Bill To", "Total", etc., occurring multiple times across the document.
- • Page-wise distribution: Detect invoice groupings across consecutive pages. For example, a 14-page PDF where:
-   - Pages 1–3 have one invoice block (Invoice 1)
-   - Pages 4–5 are blank or contain only separators
-   - Pages 6–8 have a new invoice block (Invoice 2)
-   - Pages 9–10 are blank or contain only logos
-   - Pages 11–14 contain another invoice (Invoice 3)
- should be considered as 3 invoices.
-
-
-- Use page breaks, whitespace patterns, blank pages, or layout resets as segmentation clues.
-
-
-- Count an invoice block only if it contains at least a valid invoice number or total amount, and optionally, a date or vendor name.
-
-
-- Return the count as a stringified integer:
- • If multiple distinct invoice blocks are confidently identified, return their count (e.g., "3").
- • If only one invoice is confidently identified across the document, return "1".
- • If the structure is ambiguous or incomplete, return "0".
-
-
-Important Notes:
-- Do NOT hallucinate or fabricate missing information. If a field is not found or unclear, use:
- - "N/A" for date, invoiceNumber, vendorName, amount
- - "unknown" for invoiceStatus
-- Ensure that output is valid JSON (no trailing commas, no missing quotes).
-
-
-Output Example:
-{
- "date": "2024-11-01",
- "invoiceNumber": "INV-102938",
- "vendorName": "Acme Technologies Pvt. Ltd.",
- "amount": "₹1750.00",
- "invoiceStatus": "inflow",
- "numberofinvoices": "1"
-}
+ // Add OCR text to the prompt if available
+ let promptText = `
+You are a document analysis AI system specialized in processing invoices and billing documents.
+Analyze the attached file (PDF or image) and extract the following key data fields accurately and consistently.
 `;
+
+ if (ocrText && ocrText.length > 100) { // Only include if meaningful
+   promptText += `
+Here is the OCR-extracted text from the document (use this as your primary source if possible):
+
+${ocrText}
+
+---
+`;
+ }
+
+ promptText += `
+ INVOICE DATA EXTRACTION INSTRUCTIONS
+ 
+ Analyze the provided document(s) and extract invoice information. Handle both single and multiple invoice scenarios carefully.
+ 
+ CRITICAL: First determine if this document contains multiple invoices, then adjust your extraction strategy accordingly.
+ 
+ Return your output as a valid JSON object with exactly the following structure:
+ 
+ For SINGLE invoice files:
+ {
+   "date": "YYYY-MM-DD",
+   "invoiceNumber": "string",
+   "vendorName": "string", 
+   "amount": "string",
+   "invoiceStatus": "inflow | outflow | unknown",
+   "numberofinvoices": "1"
+ }
+ 
+ For MULTIPLE invoice files:
+ {
+   "date": "COMBINED_DATES_OR_RANGE",
+   "invoiceNumber": "MULTIPLE_INVOICES",
+   "vendorName": "PRIMARY_OR_MULTIPLE_VENDORS",
+   "amount": "TOTAL_OR_RANGE", 
+   "invoiceStatus": "COMBINED_STATUS",
+   "numberofinvoices": "actual_count_as_string"
+ }
+ 
+ STEP 1: INVOICE COUNT DETECTION
+ Before extracting any data, determine the number of invoices using these indicators:
+ 
+ Strong Indicators of Multiple Invoices:
+ - Multiple unique invoice numbers (e.g., "INV-001", "INV-002", "BILL-123")
+ - Repeated complete invoice headers/footers
+ - Multiple "Invoice Date" or "Bill Date" entries with different values
+ - Multiple "Total Due" or "Amount Payable" sections
+ - Multiple "Bill To" or "Invoice To" blocks with different recipients
+ - Page breaks followed by new invoice structures
+ - Different vendor letterheads or logos appearing multiple times
+ - Sequential invoice layouts (common in batch processing)
+ 
+ Weak Indicators (verify carefully):
+ - Multiple line items (could be one detailed invoice)
+ - Multiple dates (could be order date, invoice date, due date for same invoice)
+ - Long documents (could be one complex invoice with attachments)
+ 
+ STEP 2: EXTRACTION RULES BY SCENARIO
+ 
+ === FOR SINGLE INVOICE (numberofinvoices = "1") ===
+ 
+ 1. "date": 
+    - Extract the primary invoice/bill date
+    - Priority order: "Invoice Date" > "Bill Date" > "Date Issued" > "Created Date"
+    - Format as YYYY-MM-DD
+    - If multiple dates exist, choose the one closest to the main invoice header
+ 
+ 2. "invoiceNumber":
+    - Look for: "Invoice #", "Invoice No", "Bill #", "Reference #", "Document #"
+    - Clean: Keep alphanumerics, hyphens, periods, ampersands, spaces only
+    - Remove: underscores, slashes, excessive whitespace
+ 
+ 3. "vendorName":
+    - Extract the invoice issuer (company sending the bill)
+    - Look in: document header, "From" section, company logo area, "Issued by"
+    - Clean: Remove special chars except alphanumerics, periods, hyphens, ampersands, spaces
+    - Prioritize official company name over individual names
+ 
+ 4. "amount":
+    - Extract final payable amount
+    - Priority: "Total Due" > "Amount Payable" > "Grand Total" > "Balance Due" > "Total"
+    - Include currency symbol, format as string (e.g., "₹1025.50")
+    - Remove thousands separators (use "₹1025.50" not "₹1,025.50")
+ 
+ 5. "invoiceStatus":
+    - "outflow": You are paying (look for "Bill To: [Your Company]", "Invoice To: [You]")
+    - "inflow": You are receiving payment (look for "Bill To: [Other Company]", you are the vendor)
+    - "unknown": Cannot determine clearly
+ 
+ === FOR MULTIPLE INVOICES (numberofinvoices > "1") ===
+ 
+ 1. "date":
+    - If all invoices have same date: use that date
+    - If dates span a range: use "YYYY-MM-DD to YYYY-MM-DD" format
+    - If dates are scattered: use "MULTIPLE_DATES"
+ 
+ 2. "invoiceNumber":
+    - Always set to "MULTIPLE_INVOICES"
+    - Do not attempt to list all numbers
+ 
+ 3. "vendorName":
+    - If same vendor for all: use that vendor name
+    - If multiple vendors: use "MULTIPLE_VENDORS"
+    - If one primary vendor with subsidiaries: use primary vendor name
+ 
+ 4. "amount":
+    - If clear total across all invoices: calculate and include currency
+    - If unclear or mixed currencies: use "MULTIPLE_AMOUNTS"
+    - Format: "₹[total]" or "MULTIPLE_AMOUNTS"
+ 
+ 5. "invoiceStatus":
+    - If all invoices same direction: use "inflow" or "outflow"
+    - If mixed directions: use "mixed"
+    - If unclear: use "unknown"
+ 
+ 6. "numberofinvoices":
+    - Count distinct invoice documents
+    - Must be string representation of integer
+    - Only count invoices with at least invoice number OR amount OR vendor name
+ 
+ STEP 3: VALIDATION AND ERROR HANDLING
+ 
+ - Do NOT fabricate missing information
+ - Use "N/A" for missing fields (except invoiceStatus and numberofinvoices)
+ - Use "unknown" for unclear invoiceStatus
+ - Ensure valid JSON (no trailing commas, proper quotes)
+ - Double-check invoice count before finalizing
+ 
+ STEP 4: COMMON MULTI-INVOICE SCENARIOS
+ 
+ Scenario A: Batch Invoice Processing
+ - Multiple invoices from same vendor to different customers
+ - Extract: vendor name, set invoiceNumber to "MULTIPLE_INVOICES", count accurately
+ 
+ Scenario B: Statement with Multiple Bills
+ - One document containing several billing periods
+ - Extract: primary vendor, date range, total if available
+ 
+ Scenario C: Consolidated Invoice Pack
+ - Different vendors, different time periods
+ - Extract: "MULTIPLE_VENDORS", date range, "MULTIPLE_AMOUNTS"
+ 
+ EXAMPLES:
+ 
+ Single Invoice:
+ {
+   "date": "2024-11-01",
+   "invoiceNumber": "INV-102938", 
+   "vendorName": "Acme Technologies Pvt. Ltd.",
+   "amount": "₹1750.00",
+   "invoiceStatus": "outflow",
+   "numberofinvoices": "1"
+ }
+ 
+ Multiple Invoices (Same Vendor):
+ {
+   "date": "2024-11-01 to 2024-11-15",
+   "invoiceNumber": "MULTIPLE_INVOICES",
+   "vendorName": "Acme Technologies Pvt. Ltd.", 
+   "amount": "₹5250.00",
+   "invoiceStatus": "outflow",
+   "numberofinvoices": "3"
+ }
+ 
+ Multiple Invoices (Different Vendors):
+ {
+   "date": "MULTIPLE_DATES",
+   "invoiceNumber": "MULTIPLE_INVOICES",
+   "vendorName": "MULTIPLE_VENDORS",
+   "amount": "MULTIPLE_AMOUNTS", 
+   "invoiceStatus": "mixed",
+   "numberofinvoices": "4"
+ }
+ 
+ Now analyze the provided document and return the appropriate JSON response.
+ `;
 
 
 
@@ -825,18 +886,23 @@ Output Example:
 * @param {string} sheetName The name of the sheet where the file is listed.
 * @param {number} row The row number in the sheet where the file entry is located.
 * @param {number} column The column number in the sheet to update (typically 1 for Column A).
+* @param {string} invoiceStatus The status of the invoice.
+* @param {string} vendorName The name of the vendor.
 * @returns {Object} A result object with success status and message.
 */
-function renameFileAndUpdateSheetGAS(fileId, newName, sheetName, row, column, invoiceStatus) {
+function renameFileAndUpdateSheetGAS(fileId, newName, sheetName, row, column, invoiceStatus, vendorName) {
  console.log(`Attempting to rename file "${fileId}" to "${newName}" and update sheet with invoice status "${invoiceStatus}".`);
  try {
    if (!fileId || !newName || !sheetName || !row || !column) {
      throw new Error("Missing one or more required parameters for renaming operation.");
    }
 
+
    // Validate the new filename before proceeding. This is crucial now.
    const validation = validateFilenameConvention(newName);
    if (!validation.isValid) {
+     // If the generated/user-edited name is invalid, we should ideally not proceed
+     // or at least warn significantly. For this workflow, I'll return an error.
      const errorMessage = `Attempted rename with an invalid new filename: "${newName}". Reason: ${validation.reason}. Details: ${validation.details}`;
      console.error(errorMessage);
      return {
@@ -846,42 +912,13 @@ function renameFileAndUpdateSheetGAS(fileId, newName, sheetName, row, column, in
      };
    }
 
+
    // Rename the file in Google Drive
    const file = DriveApp.getFileById(fileId);
    const oldName = file.getName();
    file.setName(newName);
    console.log(`File ID "${fileId}" successfully renamed from "${oldName}" to "${newName}" in Drive.`);
 
-   // --- Move file to correct inflow/outflow folder if needed ---
-   let inflowOutflowSheetName = null;
-   if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
-     // Determine company from sheetName (case-insensitive)
-     let company = null;
-     if (/analogy/i.test(sheetName)) {
-       company = "analogy";
-     } else if (/humane/i.test(sheetName)) {
-       company = "humane";
-     }
-     if (company) {
-       const targetKey = `${company}-${invoiceStatus}`;
-       const targetFolderId = COMPANY_FOLDER_MAP[targetKey];
-       inflowOutflowSheetName = targetKey;
-       if (targetFolderId) {
-         try {
-           const targetFolder = DriveApp.getFolderById(targetFolderId);
-           targetFolder.addFile(file);
-           console.log(`Moved file ${fileId} to folder ${targetKey} (${targetFolderId})`);
-         } catch (moveErr) {
-           console.error(`Failed to move file ${fileId} to folder ${targetKey}: ${moveErr.message}`);
-         }
-       } else {
-         console.warn(`No folder mapping found for key: ${targetKey}`);
-       }
-     } else {
-       console.warn(`Could not determine company from sheetName: ${sheetName}`);
-     }
-   }
-   // --- End move logic ---
 
    // Update the sheet with the new filename and invoice status
    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
@@ -889,9 +926,11 @@ function renameFileAndUpdateSheetGAS(fileId, newName, sheetName, row, column, in
      throw new Error(`Sheet "${sheetName}" not found for updating.`);
    }
 
+
    // Update filename in the specified column (typically Column A)
    sheet.getRange(row, column).setValue(newName);
    console.log(`Sheet "${sheetName}", Cell[${row},${column}] successfully updated with "${newName}".`);
+
 
    // Update invoice status if provided and valid
    if (invoiceStatus && (invoiceStatus === "inflow" || invoiceStatus === "outflow")) {
@@ -904,51 +943,6 @@ function renameFileAndUpdateSheetGAS(fileId, newName, sheetName, row, column, in
      }
    }
 
-   // --- Add row to inflow/outflow sheet if needed ---
-   if (inflowOutflowSheetName) {
-     const ss = SpreadsheetApp.getActiveSpreadsheet();
-     let inflowOutflowSheet = ss.getSheetByName(inflowOutflowSheetName);
-     const headers = [
-       'File Name', 'File ID', 'File URL',
-       'Date Created (Drive)', 'Last Updated (Drive)', 'Size (bytes)', 'Mime Type',
-       'Email Subject', 'Gmail Message ID', 'invoice status'
-     ];
-     if (!inflowOutflowSheet) {
-       inflowOutflowSheet = ss.insertSheet(inflowOutflowSheetName);
-     }
-     // Always check if the sheet is empty before appending headers
-     if (inflowOutflowSheet.getLastRow() === 0) {
-       inflowOutflowSheet.appendRow(headers);
-       SpreadsheetApp.flush();
-     }
-     // Check if fileId already exists in the sheet
-     const data = inflowOutflowSheet.getDataRange().getValues();
-     let fileIdExists = false;
-     for (let i = 1; i < data.length; i++) {
-       if (data[i][1] == fileId) {
-         fileIdExists = true;
-         break;
-       }
-     }
-     if (!fileIdExists) {
-       inflowOutflowSheet.appendRow([
-         newName,
-         fileId,
-         file.getUrl(),
-         file.getDateCreated(),
-         file.getLastUpdated(),
-         file.getSize(),
-         file.getMimeType(),
-         '', // Email Subject
-         '', // Gmail Message ID
-         invoiceStatus
-       ]);
-       console.log(`Added file ${fileId} to sheet ${inflowOutflowSheetName}`);
-     } else {
-       console.log(`File ${fileId} already exists in sheet ${inflowOutflowSheetName}, not adding duplicate.`);
-     }
-   }
-   // --- End inflow/outflow sheet logic ---
 
    return {
      success: true,
@@ -967,7 +961,6 @@ function renameFileAndUpdateSheetGAS(fileId, newName, sheetName, row, column, in
    };
  }
 }
-
 
 /*
 * Helper function to find the "Invoice Status" column in a sheet.
@@ -993,4 +986,30 @@ function findInvoiceStatusColumn(sheet) {
    console.error("Error finding Invoice Status column:", e.message);
    return 0;
  }
+}
+
+/**
+ * Extracts text from an image or PDF file using Google Drive OCR.
+ * @param {string} fileId - The ID of the file to OCR.
+ * @returns {string} - The extracted text, or an error message.
+ */
+function extractTextWithOCR(fileId) {
+  try {
+    var file = DriveApp.getFileById(fileId);
+    var blob = file.getBlob();
+    var resource = {
+      title: file.getName(),
+      mimeType: MimeType.GOOGLE_DOCS
+    };
+    var ocrFile = Drive.Files.insert(resource, blob, {
+      ocr: true,
+      ocrLanguage: 'en'
+    });
+    var doc = DocumentApp.openById(ocrFile.id);
+    var text = doc.getBody().getText();
+    DriveApp.getFileById(ocrFile.id).setTrashed(true); // Clean up
+    return text;
+  } catch (e) {
+    return '';
+  }
 }

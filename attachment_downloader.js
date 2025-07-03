@@ -1,3 +1,6 @@
+//attachment_downloader.js code till 1:00 pm 03-07-2025
+
+
 /**
  * @fileoverview This script processes Gmail attachments from specific labels,
  * saves them to corresponding Google Drive folders, and logs file details
@@ -8,10 +11,17 @@
  * - Uses only main company folder paths (aligned with Reroute.js)
  * - Dynamically navigates through FY → Accruals → Buffer/Bills and Invoices → Month → Inflow/Outflow
  * - Automatically detects financial year and month from file date
+ *
+ * NEW FUNCTIONALITY:
+ * - When 'Status' in buffer sheet is 'Delete', deletes file from Inflow/Outflow folders and associated log entries from Main, Inflow, Outflow sheets.
+ * - When 'Status' in buffer sheet is 'Active', copies file from buffer to Inflow/Outflow folders and re-logs entries in Main, Inflow, Outflow sheets.
  */
 
 // Global variable to track cancellation status
 var CANCELLATION_TOKEN = null;
+
+// Add this line below your other global variables:
+var isScriptEdit = false;
 
 // --- IMPORTANT: CONFIGURE YOUR DRIVE FOLDER IDs HERE ---
 // Aligned with Reroute.js - only main company folders needed
@@ -39,7 +49,7 @@ const MAIN_SHEET_HEADERS = [
 function calculateFinancialYear(date) {
   const year = date.getFullYear();
   const month = date.getMonth() + 1; // getMonth() returns 0-11
-  
+
   // Financial year starts from April (month 4)
   if (month >= 4) {
     // Current year to next year
@@ -72,7 +82,7 @@ function getMonthFromDate(date) {
 function getOrCreateFolder(parentFolder, folderName) {
   try {
     const folders = parentFolder.getFoldersByName(folderName);
-    
+
     if (folders.hasNext()) {
       return folders.next(); // Returns existing folder
     } else {
@@ -126,6 +136,24 @@ function createFlowFolderStructure(companyName, financialYear, month, flowType) 
     throw error;
   }
 }
+
+
+/**
+ * Helper to determine the target inflow/outflow folder based on file date and invoice status.
+ * @param {string} companyName - The company name.
+ * @param {Date} fileDate - The date of the file creation.
+ * @param {string} invoiceStatus - 'inflow' or 'outflow'.
+ * @returns {GoogleAppsScript.Drive.DriveFolder} The target flow folder.
+ */
+function findOrCreateFlowFolder(companyName, fileDate, invoiceStatus) {
+  if (invoiceStatus !== "inflow" && invoiceStatus !== "outflow") {
+    throw new Error("Invalid invoice status for flow folder creation: " + invoiceStatus);
+  }
+  const financialYear = calculateFinancialYear(fileDate);
+  const month = getMonthFromDate(fileDate);
+  return createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+}
+
 
 /**
  * Sets the cancellation token to stop processing
@@ -296,6 +324,7 @@ function findAttachmentInMessage(message, attachmentName) {
  * @param {GoogleAppsScript.Drive.File} driveFile The Drive file object.
  * @param {string} emailSubject The subject of the original email.
  * @param {string} gmailMessageId The ID of the original Gmail message.
+ * @param {string} invoiceStatus The determined invoice status (inflow, outflow, unknown).
  */
 function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, invoiceStatus) {
   logSheet.appendRow([
@@ -314,7 +343,22 @@ function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, i
 }
 
 /**
- * Process attachments from Gmail labels and save them to Google Drive folders
+ * Gets the email subject for a given Gmail Message ID.
+ * @param {string} gmailMessageId The Gmail message ID.
+ * @returns {string} The email subject, or 'N/A' if not found.
+ */
+function getEmailSubjectForMessageId(gmailMessageId) {
+  try {
+    const message = GmailApp.getMessageById(gmailMessageId);
+    return message ? message.getSubject() : 'N/A';
+  } catch (e) {
+    Logger.log(`Could not get subject for Gmail Message ID ${gmailMessageId}: ${e.toString()}`);
+    return 'N/A';
+  }
+}
+
+/**
+ * Processes attachments from Gmail labels and save them to Google Drive folders
  * @param {string} labelName - The Gmail label name (e.g., 'analogy', 'humane')
  * @param {string} processToken - Unique token for this process
  * @returns {Object} An object with status and message.
@@ -325,12 +369,14 @@ function processAttachments(labelName, processToken) {
 
   clearCancellationToken(); // Clear any existing token and set a new one for this run.
 
-  // Determine the target buffer sheet and folder based on the labelName
-  const bufferLabelName = `${labelName}-buffer`;
-  
+  // Example: labelName = "analogy/accruals/bills&invoices"
+  const companyName = labelName.split('/')[0]; // "analogy" or "humane"
+const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[companyName]);
+  const bufferLabelName = `${companyName}-buffer`;
+
   // Check if the company exists in our folder mapping
-  if (!ATTACHMENT_COMPANY_FOLDER_MAP[labelName]) {
-    return { status: 'error', message: `Error: No Drive folder configured for company '${labelName}'. Please update the script.` };
+  if (!ATTACHMENT_COMPANY_FOLDER_MAP[companyName]) {
+    return { status: 'error', message: `Error: No Drive folder configured for company '${companyName}'. Please update the script.` };
   }
 
   let bufferSheet;
@@ -366,10 +412,11 @@ function processAttachments(labelName, processToken) {
     return { status: 'error', message: `Error setting up buffer sheet for ${bufferLabelName}: ${e.toString()}` };
   }
 
-  try {
-    // Get the main company folder
-    const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[labelName]);
-    const gmailLabel = GmailApp.getUserLabelByName(labelName); // Original Gmail label (analogy/humane)
+try {
+  // Get the main company folder
+  const companyName = labelName.split('/')[0]; // "analogy" or "humane"
+  const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[companyName]);
+  const gmailLabel = GmailApp.getUserLabelByName(labelName); // Original Gmail label (analogy/humane)
 
     if (!gmailLabel) {
       return { status: 'error', message: `Error: Gmail label '${labelName}' not found.` };
@@ -448,17 +495,64 @@ function processAttachments(labelName, processToken) {
               let driveFile = null;
 
               if (!isDuplicateChangedFilename) {
-                // For now, save to the main company folder
-                // The processBufferFilesAndLog function will move it to the correct buffer folder later
-                driveFile = companyFolder.createFile(attachment);
+                // Store in Buffer/Active with the correct name
+                const now = new Date();
+                const month = getMonthFromDate(now);
+                const financialYear = calculateFinancialYear(now);
+                const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
+
+                // Create the file with the changedFilename
+                const renamedBlob = attachment.copyBlob().setName(changedFilename);
+                driveFile = bufferActiveFolder.createFile(renamedBlob);
                 processedAttachments++;
                 attachmentsProcessedForThisMessage++;
-                existingChangedFilenamesInCurrentBuffer.add(changedFilename); // Add to set for current run's duplicate checking
+                existingChangedFilenamesInCurrentBuffer.add(changedFilename);
+
+                // AI logic
+                const emailSubject = message.getSubject ? message.getSubject() : '';
+                const blob = driveFile.getBlob();
+                const aiResult = callGeminiAPIInternal(blob, changedFilename);
+                const invoiceStatus = aiResult.invoiceStatus || "unknown";
+
+                // Log to main sheet
+                let mainSheet = ss.getSheetByName(companyName);
+                if (!mainSheet) {
+                  mainSheet = ss.insertSheet(companyName);
+                  mainSheet.appendRow(MAIN_SHEET_HEADERS);
+                }
+                logFileToMainSheet(mainSheet, driveFile, emailSubject, messageId, invoiceStatus);
+
+                // If inflow/outflow, create a true copy in the inflow/outflow folder
+                if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
+                  const now = new Date();
+                  const month = getMonthFromDate(now);
+                  const financialYear = calculateFinancialYear(now);
+                  const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+
+                  let flowFile = null;
+                  try {
+                    flowFile = driveFile.makeCopy(changedFilename, flowFolder);
+                    Logger.log(`Copied file ${changedFilename} to ${invoiceStatus} folder for ${financialYear}/${month}.`);
+                  } catch (copyErr) {
+                    Logger.log(`Error copying file ${changedFilename} to ${invoiceStatus} folder: ${copyErr}`);
+                  }
+
+                  // Log to inflow/outflow sheet (log the copy, not the buffer file)
+                  const flowSheetName = `${companyName}-${invoiceStatus}`;
+                  let flowSheet = ss.getSheetByName(flowSheetName);
+                  if (!flowSheet) {
+                    flowSheet = ss.insertSheet(flowSheetName);
+                    flowSheet.appendRow(MAIN_SHEET_HEADERS);
+                  }
+                  if (flowFile) {
+                    logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus);
+                  }
+                }
               } else {
-                // If it's a duplicate by changed filename, we don't upload to Drive again, but still log the entry in buffer
+                // If duplicate, don't upload again, but log in buffer
                 Logger.log(`Skipping upload: Duplicate changed filename '${changedFilename}' already exists in buffer folder for '${labelName}'.`);
                 skippedAttachments++;
-                attachmentsProcessedForThisMessage++; // Still counted as handled
+                attachmentsProcessedForThisMessage++;
               }
 
               // Append to buffer sheet
@@ -467,9 +561,9 @@ function processAttachments(labelName, processToken) {
                 changedFilename,
                 invoiceId,
                 driveFile ? driveFile.getId() : '', // Drive File ID
-                messageId,                          // Gmail Message ID
-                '',                                 // Reason (blank for new entries)
-                'Active'                            // Default Status (Active)
+                messageId,                               // Gmail Message ID
+                '',                                      // Reason (blank for new entries)
+                'Active'                                 // Default Status (Active)
               ];
               bufferSheet.appendRow(rowData);
               const newRowIndex = bufferSheet.getLastRow();
@@ -487,7 +581,7 @@ function processAttachments(labelName, processToken) {
               }
               Utilities.sleep(100);
 
-              Logger.log("Created file: " + driveFile.getName() + " in folder: " + companyFolder.getName() + " (" + companyFolder.getId() + ")");
+              Logger.log("Created file: " + (driveFile ? driveFile.getName() : originalFilename) + " in buffer folder for: " + companyName);
 
             } catch (fileError) {
               Logger.log(`Error processing attachment '${attachment.getName()}': ${fileError.toString()}`);
@@ -576,68 +670,186 @@ function processBufferFilesAndLog(companyName) {
   }
 
   const bufferData = bufferSheet.getDataRange().getValues();
+  const bufferRanges = bufferSheet.getDataRange();
 
   for (let i = 1; i < bufferData.length; i++) { // Start from 1 to skip header row
     const row = bufferData[i];
     const originalFilename = row[0];
     const changedFilename = row[1];
-    const driveFileId = row[3];
+    let driveFileId = row[3]; // This can be updated
     const gmailMessageId = row[4];
     const status = row[6]; // Status column
+    const bufferRowIndex = i + 1; // 1-indexed row number in the sheet
 
-    // Only process 'Active' files that have a valid Drive File ID and are not already marked 'DELETED'
-    if (status === 'Active' && driveFileId && driveFileId !== 'DELETED') {
+    // Only process 'Active' files that have a valid Drive File ID (or a placeholder 'DELETED' that needs to be re-created)
+    if (status === 'Active' && (driveFileId && driveFileId !== '')) {
       try {
-        const file = DriveApp.getFileById(driveFileId);
-        
+        let file;
+        let fileNeedsCopyingFromBuffer = false; // Flag to check if we need to copy from buffer folder
+
+        if (driveFileId === 'DELETED') {
+          // File was marked deleted and now needs to be restored from buffer
+          fileNeedsCopyingFromBuffer = true;
+          const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[companyName]);
+          const financialYear = calculateFinancialYear(new Date()); // Use current date for initial buffer folder search
+          const bufferFolder = createBufferFolderStructure(companyName, financialYear);
+
+          const filesInFolder = bufferFolder.getFilesByName(changedFilename);
+          if (filesInFolder.hasNext()) {
+            file = filesInFolder.next(); // Get the file from buffer
+            driveFileId = file.getId(); // Update DriveFileId with the actual ID from buffer
+            bufferSheet.getRange(bufferRowIndex, 4).setValue(driveFileId); // Update the buffer sheet with the new ID
+            Logger.log(`Found file in buffer folder for restoration: ${changedFilename} (${driveFileId})`);
+          } else {
+            Logger.log(`File '${changedFilename}' (ID: ${driveFileId}) not found in buffer folder. Cannot restore.`);
+            bufferSheet.getRange(bufferRowIndex, 6).setValue('Error: File not found in buffer for restore.');
+            continue; // Skip to next row
+          }
+        } else {
+          // File should exist, verify it
+          try {
+            file = DriveApp.getFileById(driveFileId);
+            // Verify file name consistency
+            if (file.getName() !== changedFilename) {
+              file.setName(changedFilename);
+              Logger.log(`Renamed file ${originalFilename} to ${changedFilename} in buffer folder.`);
+            }
+          } catch (e) {
+            Logger.log(`File with ID ${driveFileId} not found in Drive. Attempting to find in buffer for re-creation.`);
+            // If file is not found in Drive, it means it was likely deleted manually or not created properly.
+            // We'll treat this as if it needs to be restored from buffer if a file with changedFilename exists there.
+            fileNeedsCopyingFromBuffer = true;
+            const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[companyName]);
+            const financialYear = calculateFinancialYear(new Date()); // Use current date for initial buffer folder search
+            const bufferFolder = createBufferFolderStructure(companyName, financialYear);
+            const filesInFolder = bufferFolder.getFilesByName(changedFilename);
+            if (filesInFolder.hasNext()) {
+              file = filesInFolder.next(); // Get the file from buffer
+              driveFileId = file.getId(); // Update DriveFileId with the actual ID from buffer
+              bufferSheet.getRange(bufferRowIndex, 4).setValue(driveFileId); // Update the buffer sheet with the new ID
+              Logger.log(`Found missing file in buffer folder for re-creation: ${changedFilename} (${driveFileId})`);
+            } else {
+              Logger.log(`File '${changedFilename}' (ID: ${driveFileId}) not found in buffer folder either. Cannot restore/re-process.`);
+              bufferSheet.getRange(bufferRowIndex, 6).setValue('Error: File not found in Drive or buffer for re-process.');
+              continue; // Skip to next row
+            }
+          }
+        }
+
         // Get file creation date to determine financial year and month
         const fileDate = file.getDateCreated();
         const financialYear = calculateFinancialYear(fileDate);
         const month = getMonthFromDate(fileDate);
 
-        // 1. Move file to correct buffer folder based on financial year
+        // 1. Move file to correct buffer folder based on financial year (only if it needs to be moved)
         const bufferFolder = createBufferFolderStructure(companyName, financialYear);
-        
-        // Move file to buffer folder if it's not already there
-        const currentParent = file.getParents().next();
-        if (currentParent.getId() !== bufferFolder.getId()) {
+        const currentParents = file.getParents();
+        let isAlreadyInBufferFolder = false;
+        while(currentParents.hasNext()){
+          if(currentParents.next().getId() === bufferFolder.getId()){
+            isAlreadyInBufferFolder = true;
+            break;
+          }
+        }
+
+        if (!isAlreadyInBufferFolder) {
           file.moveTo(bufferFolder);
           Logger.log(`Moved file ${changedFilename} to ${companyName} ${financialYear} buffer folder.`);
         }
 
-        // 2. Rename the file in the buffer folder if necessary
-        if (file.getName() !== changedFilename) {
-          file.setName(changedFilename);
-          Logger.log(`Renamed file ${originalFilename} to ${changedFilename} in buffer folder.`);
-        }
-
-        // 3. Use AI to determine inflow/outflow/unknown
+        // 2. Use AI to determine inflow/outflow/unknown
         const emailSubject = getEmailSubjectForMessageId(gmailMessageId);
         const blob = file.getBlob();
         const aiResult = callGeminiAPIInternal(blob, changedFilename);
         const invoiceStatus = aiResult.invoiceStatus || "unknown";
         Logger.log(`AI invoiceStatus for file ${changedFilename}: ${invoiceStatus}`);
 
-        // 4. Log to main sheet, including invoice status (sheet only, no drive storage)
+        // 3. Delete existing log entries from Main, Inflow, Outflow sheets before re-logging
+        deleteLogEntries(mainSheet, driveFileId, gmailMessageId);
+        deleteLogEntries(inflowSheet, driveFileId, gmailMessageId);
+        deleteLogEntries(outflowSheet, driveFileId, gmailMessageId);
+
+
+        // 4. Log to main sheet (sheet only, no drive storage)
         logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus);
 
         // 5. Copy to inflow or outflow if appropriate (both sheet and drive)
-        if (invoiceStatus === "inflow") {
-          const inflowFolder = createFlowFolderStructure(companyName, financialYear, month, "inflow");
-          const copiedFile = file.makeCopy(changedFilename, inflowFolder);
-          logFileToMainSheet(inflowSheet, copiedFile, emailSubject, gmailMessageId, "inflow");
-          Logger.log(`Copied file ${changedFilename} to ${companyName} ${financialYear} ${month} inflow folder.`);
-        } else if (invoiceStatus === "outflow") {
-          const outflowFolder = createFlowFolderStructure(companyName, financialYear, month, "outflow");
-          const copiedFile = file.makeCopy(changedFilename, outflowFolder);
-          logFileToMainSheet(outflowSheet, copiedFile, emailSubject, gmailMessageId, "outflow");
-          Logger.log(`Copied file ${changedFilename} to ${companyName} ${financialYear} ${month} outflow folder.`);
+        if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
+          const targetFlowFolder = findOrCreateFlowFolder(companyName, fileDate, invoiceStatus);
+
+          // Check if a file with the same name already exists in the target flow folder
+          let copiedFile = null;
+          const existingFilesInFlow = targetFlowFolder.getFilesByName(changedFilename);
+          if (existingFilesInFlow.hasNext()) {
+            copiedFile = existingFilesInFlow.next();
+            Logger.log(`File ${changedFilename} already exists in ${invoiceStatus} folder. Reusing existing.`);
+          } else {
+            copiedFile = file.makeCopy(changedFilename, targetFlowFolder);
+            Logger.log(`Copied file ${changedFilename} to ${companyName} ${financialYear} ${month} ${invoiceStatus} folder.`);
+          }
+
+          const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
+          logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus);
         }
-        // If "unknown", do nothing extra (already logged in main sheet)
+
+        // Clear any previous "Reason" or yellow background if successfully processed as Active
+        bufferSheet.getRange(bufferRowIndex, 6).setValue('');
+        bufferSheet.getRange(bufferRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground(null); // Remove background color
+
 
       } catch (e) {
-        Logger.log(`Error processing buffer row for file ID ${driveFileId}: ${e.toString()}`);
-        ui.alert('Error', `Could not process file "${originalFilename}" from buffer: ${e.message}`, ui.ButtonSet.OK);
+        Logger.log(`Error processing buffer row for file ID ${driveFileId} (Row ${bufferRowIndex}): ${e.toString()}`);
+        ui.alert('Error', `Could not process file "${originalFilename}" from buffer (Row ${bufferRowIndex}): ${e.message}`, ui.ButtonSet.OK);
+        bufferSheet.getRange(bufferRowIndex, 6).setValue(`Error: ${e.message}`); // Log error reason
+        bufferSheet.getRange(bufferRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FF0000'); // Red background for error
+      }
+    } else if (status === 'Delete' && driveFileId && driveFileId !== 'DELETED') {
+      // Handle deletion when status is set to 'Delete'
+      Logger.log(`Processing 'Delete' status for file: ${changedFilename} (ID: ${driveFileId})`);
+      try {
+        const fileToDelete = DriveApp.getFileById(driveFileId);
+        const emailSubject = getEmailSubjectForMessageId(gmailMessageId); // Get subject before deleting logs
+
+        // Delete from Inflow/Outflow Drive folders (if it exists there)
+        // Find all parents of the file and check if any are inflow/outflow
+        const parents = fileToDelete.getParents();
+        let isFileInFlowFolder = false;
+        while(parents.hasNext()){
+          const parent = parents.next();
+          // Check if parent path contains "Bills and Invoices"
+          // This is a heuristic, a more robust solution might involve storing parent folder IDs
+          if (parent.getName().toLowerCase() === "inflow" || parent.getName().toLowerCase() === "outflow") {
+            try {
+              fileToDelete.setTrashed(true); // Move to trash
+              Logger.log(`Trashed file ${changedFilename} (ID: ${driveFileId}) from flow folder.`);
+              isFileInFlowFolder = true;
+              break;
+            } catch (trashError) {
+              Logger.log(`Could not trash file ${driveFileId}: ${trashError.toString()}. It might already be trashed or moved.`);
+            }
+          }
+        }
+        if(!isFileInFlowFolder) {
+            Logger.log(`File ${changedFilename} (ID: ${driveFileId}) was not found in an Inflow/Outflow folder or could not be trashed.`);
+        }
+
+
+        // Delete corresponding log entries from Main, Inflow, Outflow sheets
+        deleteLogEntries(mainSheet, driveFileId, gmailMessageId);
+        deleteLogEntries(inflowSheet, driveFileId, gmailMessageId);
+        deleteLogEntries(outflowSheet, driveFileId, gmailMessageId);
+
+        // Mark the Drive File ID in the buffer sheet as 'DELETED'
+        bufferSheet.getRange(bufferRowIndex, 4).setValue('DELETED');
+        bufferSheet.getRange(bufferRowIndex, 6).setValue('Deleted from flow/logs'); // Add reason
+        bufferSheet.getRange(bufferRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFD966'); // Orange background for deleted
+
+
+      } catch (e) {
+        Logger.log(`Error deleting file from flow folder/logs for ID ${driveFileId} (Row ${bufferRowIndex}): ${e.toString()}`);
+        ui.alert('Error', `Could not delete file "${changedFilename}" from flow folder/logs (Row ${bufferRowIndex}): ${e.message}`, ui.ButtonSet.OK);
+        bufferSheet.getRange(bufferRowIndex, 6).setValue(`Deletion Error: ${e.message}`); // Log error reason
+        bufferSheet.getRange(bufferRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FF0000'); // Red background for error
       }
     }
   }
@@ -646,22 +858,47 @@ function processBufferFilesAndLog(companyName) {
 }
 
 /**
- * Gets the email subject for a given Gmail Message ID.
- * @param {string} gmailMessageId The Gmail message ID.
- * @returns {string} The email subject, or 'N/A' if not found.
+ * Deletes log entries from a given sheet based on Drive File ID or Gmail Message ID.
+ * It iterates from bottom to top to avoid issues with row index changes during deletion.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The sheet to delete from.
+ * @param {string} driveFileId The Drive File ID to match.
+ * @param {string} gmailMessageId The Gmail Message ID to match.
  */
-function getEmailSubjectForMessageId(gmailMessageId) {
-  try {
-    const message = GmailApp.getMessageById(gmailMessageId);
-    return message ? message.getSubject() : 'N/A';
-  } catch (e) {
-    Logger.log(`Could not get subject for Gmail Message ID ${gmailMessageId}: ${e.toString()}`);
-    return 'N/A';
+function deleteLogEntries(sheet, driveFileId, gmailMessageId) {
+  if (!sheet) {
+    Logger.log("Sheet not found for deletion. Skipping.");
+    return;
+  }
+  const data = sheet.getDataRange().getValues();
+  // Find column indexes dynamically, assuming headers are always present
+  const fileIdColIndex = MAIN_SHEET_HEADERS.indexOf('File ID');
+  const gmailMessageIdColIndex = MAIN_SHEET_HEADERS.indexOf('Gmail Message ID');
+
+  if (fileIdColIndex === -1 || gmailMessageIdColIndex === -1) {
+    Logger.log(`Required headers for deletion not found in sheet: ${sheet.getName()}`);
+    return;
+  }
+
+  let deletedCount = 0;
+  // Iterate backwards to avoid issues with row index changes during deletion
+  for (let i = data.length - 1; i >= 1; i--) { // Start from last row, skip header
+    const row = data[i];
+    // Check if either file ID or Gmail Message ID matches
+    if (row[fileIdColIndex] === driveFileId || row[gmailMessageIdColIndex] === gmailMessageId) {
+      sheet.deleteRow(i + 1); // +1 because sheet rows are 1-indexed
+      deletedCount++;
+    }
+  }
+  if (deletedCount > 0) {
+    Logger.log(`Deleted ${deletedCount} log entries from ${sheet.getName()} for Drive ID: ${driveFileId} or Gmail ID: ${gmailMessageId}`);
   }
 }
 
+
 /**
  * Duplicates log entries and files from a source label to target labels.
+ * This function seems to be for initial setup/copying, not part of the active deletion/restoration.
+ * It's kept here as it was in the original code, but note its separate purpose.
  * @param {string} sourceLabel - The label whose data to duplicate (e.g., 'analogy').
  * @param {Array<string>} targetLabels - The labels to copy data into (e.g., ['analogy-inflow', 'analogy-outflow']).
  * @param {Object} companyFolderMap - The mapping of label names to Drive folder IDs.
@@ -693,12 +930,23 @@ function duplicateLogAndFiles(sourceLabel, targetLabels, companyFolderMap) {
       targetSheet.deleteColumns(headers.length + 1, targetSheet.getLastColumn() - headers.length);
     }
 
-    var targetFolderId = companyFolderMap[targetLabel];
-    if (!targetFolderId) {
-      Logger.log(`Target folder ID not found for ${targetLabel}. Skipping duplication.`);
+    // This `targetFolderId` logic is problematic.
+    // The targetLabel here (e.g., 'analogy-inflow') is not a direct key in ATTACHMENT_COMPANY_FOLDER_MAP.
+    // This `duplicateLogAndFiles` function needs to be re-evaluated or clarified
+    // if it's meant to copy files to inflow/outflow *folders*.
+    // For now, assuming it's meant to duplicate within the main company folder if no specific flow folder ID is mapped.
+    var targetFolder = null;
+    if (companyFolderMap[targetLabel]) {
+      targetFolder = DriveApp.getFolderById(companyFolderMap[targetLabel]);
+    } else if (companyFolderMap[sourceLabel]) {
+      // Fallback: use the source company's main folder if no specific target folder is mapped.
+      targetFolder = DriveApp.getFolderById(companyFolderMap[sourceLabel]);
+      Logger.log(`Warning: No specific folder for '${targetLabel}'. Using main folder for '${sourceLabel}'.`);
+    } else {
+      Logger.log(`Target folder ID not found for ${targetLabel} or ${sourceLabel}. Skipping duplication for ${targetLabel}.`);
       return;
     }
-    var targetFolder = DriveApp.getFolderById(targetFolderId);
+
 
     // Get existing file IDs in the target sheet to avoid re-logging
     const existingTargetFileIds = getProcessedLogEntryIds(targetSheet, 1); // File ID is at index 1
@@ -708,6 +956,7 @@ function duplicateLogAndFiles(sourceLabel, targetLabels, companyFolderMap) {
         var fileId = row[1]; // File ID column in main sheet
         var fileName = row[0]; // File Name column in main sheet
         var gmailMessageId = row[8]; // Gmail Message ID in main sheet
+        var invoiceStatus = row[9]; // Invoice Status in main sheet
 
         if (!fileId || existingTargetFileIds.has(fileId)) {
           // Skip if no fileId or already logged in target sheet
@@ -715,272 +964,427 @@ function duplicateLogAndFiles(sourceLabel, targetLabels, companyFolderMap) {
         }
 
         var file = DriveApp.getFileById(fileId);
-        var copiedFile = file.makeCopy(fileName, targetFolder); // Copy with its current name
+        var copiedFile = null;
+
+        // Determine the correct subfolder (Inflow/Outflow) if the targetLabel suggests it
+        if (targetLabel.endsWith('-inflow') || targetLabel.endsWith('-outflow')) {
+          const companyName = targetLabel.split('-')[0];
+          const flowType = targetLabel.split('-')[1];
+          const fileDate = file.getDateCreated();
+          const specificFlowFolder = createFlowFolderStructure(companyName, calculateFinancialYear(fileDate), getMonthFromDate(fileDate), flowType);
+          copiedFile = file.makeCopy(fileName, specificFlowFolder);
+          Logger.log(`Duplicated file ${fileName} to ${specificFlowFolder.getName()} folder.`);
+        } else {
+          // Default to the main company folder if not inflow/outflow specific
+          copiedFile = file.makeCopy(fileName, targetFolder); // Copy with its current name
+          Logger.log(`Duplicated file ${fileName} to ${targetFolder.getName()} folder.`);
+        }
 
         var newRow = row.slice();
         newRow[1] = copiedFile.getId();       // Update with new copied file ID
         newRow[2] = copiedFile.getUrl();      // Update with new URL
-        newRow[3] = copiedFile.getDateCreated();
-        newRow[4] = copiedFile.getLastUpdated();
-        newRow[5] = copiedFile.getSize();
-        newRow[6] = copiedFile.getMimeType();
+        newRow[3] = copiedFile.getDateCreated(); // Update with new date created
+        newRow[4] = copiedFile.getLastUpdated(); // Update with new last updated
+
+        // Ensure invoice status is consistent with target label if applicable
+        if (targetLabel.endsWith('-inflow')) {
+          newRow[9] = 'inflow';
+        } else if (targetLabel.endsWith('-outflow')) {
+          newRow[9] = 'outflow';
+        }
 
         targetSheet.appendRow(newRow);
-        existingTargetFileIds.add(copiedFile.getId()); // Add the new ID to the set
-        Logger.log(`Duplicated file ${fileName} (ID: ${copiedFile.getId()}) to ${targetLabel} sheet and folder.`);
+        Logger.log(`Logged duplicated entry for ${fileName} in ${targetSheet.getName()}.`);
+
       } catch (e) {
-        Logger.log(`Error duplicating file ${fileName} for ${targetLabel}: ${e.toString()}`);
+        Logger.log(`Error duplicating log entry for file ID ${row[1]} to ${targetLabel}: ${e.toString()}`);
       }
     });
   });
+  Logger.log(`Completed duplication for ${sourceLabel}.`);
 }
 
+
 /**
- * An installable onEdit trigger function to handle changes in buffer sheets.
- * This is the core logic for deletion and restoration.
+ * Placeholder for your Gemini API call.
+ * This function needs to be implemented to interact with your AI model.
+ * It should return an object with at least an `invoiceStatus` property.
+ * @param {GoogleAppsScript.Base.Blob} fileBlob The content of the file.
+ * @param {string} fileName The name of the file.
+ * @returns {Object} An object containing the extracted invoice status (e.g., {invoiceStatus: "inflow"}).
+ */
+function callGeminiAPIInternal(fileBlob, fileName) {
+  // --- IMPORTANT: REPLACE THIS WITH YOUR ACTUAL GEMINI API INTEGRATION ---
+  Logger.log(`Simulating Gemini API call for ${fileName}`);
+
+  // Simulate AI logic based on filename for demonstration
+  let simulatedInvoiceStatus = "unknown";
+  const lowerFileName = fileName.toLowerCase();
+
+  if (lowerFileName.includes("invoice") && !lowerFileName.includes("payment")) {
+    simulatedInvoiceStatus = "outflow"; // Assuming invoices typically represent money going out
+  } else if (lowerFileName.includes("receipt") || lowerFileName.includes("deposit")) {
+    simulatedInvoiceStatus = "inflow";
+  } else if (lowerFileName.includes("credit")) {
+    simulatedInvoiceStatus = "inflow";
+  }
+
+  // You would typically send the fileBlob content to your Gemini API here
+  // const API_KEY = "YOUR_GEMINI_API_KEY";
+  // const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=" + API_KEY;
+  //
+  // const imageData = Utilities.base64Encode(fileBlob.getBytes());
+  //
+  // const payload = {
+  //   contents: [
+  //     {
+  //       parts: [
+  //         {text: "Analyze this document and determine if it represents an 'inflow' (money coming in) or 'outflow' (money going out) for a business. If unsure, return 'unknown'. Respond with a single word: inflow, outflow, or unknown."},
+  //         {inlineData: {mimeType: fileBlob.getContentType(), data: imageData}}
+  //       ]
+  //     }
+  //   ]
+  // };
+  //
+  // const options = {
+  //   method: 'post',
+  //   contentType: 'application/json',
+  //   payload: JSON.stringify(payload),
+  //   muteHttpExceptions: true
+  // };
+  //
+  // try {
+  //   const response = UrlFetchApp.fetch(GEMINI_URL, options);
+  //   const jsonResponse = JSON.parse(response.getContentText());
+  //   Logger.log("Gemini API Response: " + JSON.stringify(jsonResponse));
+  //
+  //   if (jsonResponse.candidates && jsonResponse.candidates[0] && jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
+  //     const aiText = jsonResponse.candidates[0].content.parts[0].text.toLowerCase().trim();
+  //     if (aiText.includes("inflow")) {
+  //       simulatedInvoiceStatus = "inflow";
+  //     } else if (aiText.includes("outflow")) {
+  //       simulatedInvoiceStatus = "outflow";
+  //     } else {
+  //       simulatedInvoiceStatus = "unknown";
+  //     }
+  //   }
+  // } catch (e) {
+  //   Logger.log("Error calling Gemini API: " + e.toString());
+  //   simulatedInvoiceStatus = "unknown_api_error";
+  // }
+
+  return { invoiceStatus: simulatedInvoiceStatus };
+}
+
+// --- Add these helper functions near the top of your script, after global variables ---
+
+function setScriptEditFlag(value) {
+  PropertiesService.getScriptProperties().setProperty('isScriptEdit', value ? 'true' : 'false');
+}
+
+function getScriptEditFlag() {
+  return PropertiesService.getScriptProperties().getProperty('isScriptEdit') === 'true';
+}
+
+// --- New onEdit Trigger Function ---
+/**
+ * Handles changes in the spreadsheet, specifically for the 'Status' column in buffer sheets.
  * @param {GoogleAppsScript.Events.SheetsOnEdit} e The event object.
  */
 function onEdit(e) {
+  // Prevent multiple triggers from the same edit
+  if (getScriptEditFlag()) {
+    setScriptEditFlag(false);
+    return;
+  }
+
   const range = e.range;
   const sheet = range.getSheet();
   const sheetName = sheet.getName();
-  const row = range.getRow();
-  const col = range.getColumn();
-  const ui = SpreadsheetApp.getUi();
 
-  // Check if it's one of the buffer sheets and the Status column (column G, index 6)
-  if ((sheetName === 'analogy-buffer' || sheetName === 'humane-buffer') && col === 7 && row > 1) { // col 7 is 'G'
-    const status = e.value;
+  // Only handle Status column changes in buffer sheets
+  if (
+    sheetName.endsWith('-buffer') &&
+    range.getColumn() === BUFFER_SHEET_HEADERS.indexOf('Status') + 1 &&
+    range.getNumRows() === 1 && // Only single cell edits
+    range.getNumColumns() === 1
+  ) {
+    const companyName = sheetName.replace('-buffer', '');
+    const editedRow = range.getRow();
+    const newStatus = e.value;
     const oldStatus = e.oldValue;
+    
+    // Skip header row and prevent recursive calls
+    if (editedRow === 1 || newStatus === oldStatus) return;
 
-    // Get row data (assuming headers are 1st row)
-    const rowData = sheet.getRange(row, 1, 1, BUFFER_SHEET_HEADERS.length).getValues()[0];
-    const originalFilename = rowData[0];
+    const rowData = sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).getValues()[0];
     const changedFilename = rowData[1];
-    let driveFileId = rowData[3]; // Drive File ID column (D)
-    const gmailMessageId = rowData[4]; // Gmail Message ID column (E)
-    let reason = rowData[5];      // Reason column (F)
+    let driveFileId = rowData[3];
+    const gmailMessageId = rowData[4];
+    const ui = SpreadsheetApp.getUi();
 
-    const companyName = sheetName.split('-')[0]; // 'analogy' or 'humane'
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const mainSheet = ss.getSheetByName(companyName);
+    const inflowSheet = ss.getSheetByName(`${companyName}-inflow`);
+    const outflowSheet = ss.getSheetByName(`${companyName}-outflow`);
 
-    if (status === 'Delete') {
-      // Prompt for reason if not already provided or if changing from Active to Delete
-      if (!reason || oldStatus !== 'Delete') {
-        const response = ui.prompt(
-          'Reason for Deletion',
-          `Please provide a reason for deleting '${originalFilename}'.`,
-          ui.ButtonSet.OK_CANCEL
-        );
-        if (response.getSelectedButton() === ui.Button.OK) {
-          reason = response.getResponseText();
-          sheet.getRange(row, 6).setValue(reason); // Update Reason column
-        } else {
-          // User cancelled, revert status
-          sheet.getRange(row, col).setValue(oldStatus || 'Active'); // Revert to old status or 'Active'
-          ui.alert('Deletion Cancelled', 'The deletion was cancelled. Status reverted.', ui.ButtonSet.OK);
-          return; // Stop execution
-        }
+    // --- DELETE ACTION ---
+    if (newStatus === 'Delete' && oldStatus !== 'Delete') {
+      if (!shouldShowPrompt()) {
+        return; // Prevent multiple prompts
       }
-
-      // Delete files from inflow/outflow folders by finding them by name
-      // (since they are copies, they have different file IDs but same names)
-      try {
-        const inflowFolderId = ATTACHMENT_COMPANY_FOLDER_MAP[`${companyName}-inflow`];
-        const outflowFolderId = ATTACHMENT_COMPANY_FOLDER_MAP[`${companyName}-outflow`];
+      
+      const response = ui.prompt(
+        'Reason for Deletion',
+        `Please provide a reason for deleting "${changedFilename}".`,
+        ui.ButtonSet.OK_CANCEL
+      );
+      
+      if (response.getSelectedButton() === ui.Button.OK) {
+        const reasonText = response.getResponseText().trim();
         
-        // Delete from inflow folder
-        if (inflowFolderId) {
-          const inflowFolder = DriveApp.getFolderById(inflowFolderId);
-          const inflowFiles = inflowFolder.getFilesByName(changedFilename);
-          while (inflowFiles.hasNext()) {
-            const inflowFile = inflowFiles.next();
-            inflowFolder.removeFile(inflowFile);
-            Logger.log(`Removed file '${changedFilename}' from inflow folder.`);
-          }
-        }
-        
-        // Delete from outflow folder
-        if (outflowFolderId) {
-          const outflowFolder = DriveApp.getFolderById(outflowFolderId);
-          const outflowFiles = outflowFolder.getFilesByName(changedFilename);
-          while (outflowFiles.hasNext()) {
-            const outflowFile = outflowFiles.next();
-            outflowFolder.removeFile(outflowFile);
-            Logger.log(`Removed file '${changedFilename}' from outflow folder.`);
-          }
-        }
-        
-        Logger.log(`Deleted copies of '${originalFilename}' from inflow/outflow folders. Original file remains in buffer folder.`);
-      } catch (fileError) {
-        Logger.log(`Error deleting files from inflow/outflow folders: ${fileError.toString()}`);
-        ui.alert('Drive Deletion Error', `Could not delete copies of '${originalFilename}' from inflow/outflow folders: ${fileError.message}`, ui.ButtonSet.OK);
-        // Don't halt, proceed to delete from sheets even if Drive failed
-      }
-
-      // Mark the Drive File ID in the buffer sheet as 'DELETED'
-      sheet.getRange(row, 4).setValue('DELETED'); // Column D (index 3)
-
-      // Delete corresponding rows from main and inflow/outflow sheets
-      deleteRowFromConnectedSheets(companyName, driveFileId);
-
-    } else if (status === 'Active' && oldStatus === 'Delete') {
-      ui.alert('Restoration Initiated', `Attempting to restore '${originalFilename}' from buffer folder... This may take a moment.`, ui.ButtonSet.OK);
-
-      try {
-        // Try to find the file in the buffer folder by filename
-        const bufferFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[`${companyName}-buffer`]);
-        const files = bufferFolder.getFilesByName(changedFilename);
-        if (!files.hasNext()) {
-          ui.alert('Restoration Error', `File '${changedFilename}' not found in buffer folder. Cannot restore.`, ui.ButtonSet.OK);
-          sheet.getRange(row, col).setValue('Delete'); // Revert status
+        // Only proceed if reason is provided
+        if (!reasonText) {
+          setScriptEditFlag(true);
+          sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Active');
+          ui.alert('Error', 'Reason is required. Status reverted.', ui.ButtonSet.OK);
           return;
         }
+        
+        setScriptEditFlag(true);
+        sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(reasonText);
 
-        const restoredFile = files.next();
+        if (driveFileId && driveFileId !== 'DELETED') {
+          try {
+            const file = DriveApp.getFileById(driveFileId);
+            const fileDate = file.getDateCreated();
+            const financialYear = calculateFinancialYear(fileDate);
+            const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
+            const bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Deleted");
 
-        // Update buffer sheet with the original Drive File ID (restore it)
-        sheet.getRange(row, 4).setValue(restoredFile.getId()); // Update Drive File ID (Column D)
-        sheet.getRange(row, 6).setValue(''); // Clear Reason for restoration
+            // Move from Buffer/Active to Buffer/Deleted
+            moveFileWithDriveApi(file.getId(), bufferDeletedFolder.getId(), bufferActiveFolder.getId());
 
-        // Re-log the file to the main sheet (sheet only, no drive storage)
-        const mainSheet = sheet.getParent().getSheetByName(companyName);
-        logFileToMainSheet(mainSheet, restoredFile, getEmailSubjectForMessageId(gmailMessageId), gmailMessageId, "unknown");
+            // Move files from inflow/outflow folders to Buffer/Deleted folder
+            const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
+            const invoiceStatus = aiResult.invoiceStatus || "unknown";
+            if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
+              const month = getMonthFromDate(fileDate);
+              const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+              const filesInFlow = flowFolder.getFilesByName(changedFilename);
+              while (filesInFlow.hasNext()) {
+                const flowFile = filesInFlow.next();
+                // Move the file from inflow/outflow to Buffer/Deleted folder
+                moveFileWithDriveApi(flowFile.getId(), bufferDeletedFolder.getId(), flowFolder.getId());
+                Logger.log(`Moved file ${changedFilename} from ${invoiceStatus} folder to Buffer/Deleted folder.`);
+              }
+            }
 
-        // Use AI to determine inflow/outflow/unknown
-        const blob = restoredFile.getBlob();
-        const aiResult = callGeminiAPIInternal(blob, changedFilename);
-        const invoiceStatus = aiResult.invoiceStatus || "unknown";
-        Logger.log(`AI invoiceStatus for file ${changedFilename}: ${invoiceStatus}`);
+            // Remove log entries
+            deleteLogEntries(mainSheet, driveFileId, gmailMessageId);
+            deleteLogEntries(inflowSheet, driveFileId, gmailMessageId);
+            deleteLogEntries(outflowSheet, driveFileId, gmailMessageId);
 
-        // Copy to inflow or outflow if appropriate (both sheet and drive)
-        if (invoiceStatus === "inflow") {
-          const inflowSheet = sheet.getParent().getSheetByName(`${companyName}-inflow`);
-          const inflowFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[`${companyName}-inflow`]);
-          const copiedFile = restoredFile.makeCopy(changedFilename, inflowFolder);
-          logFileToMainSheet(inflowSheet, copiedFile, getEmailSubjectForMessageId(gmailMessageId), gmailMessageId, "inflow");
-        } else if (invoiceStatus === "outflow") {
-          const outflowSheet = sheet.getParent().getSheetByName(`${companyName}-outflow`);
-          const outflowFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[`${companyName}-outflow`]);
-          const copiedFile = restoredFile.makeCopy(changedFilename, outflowFolder);
-          logFileToMainSheet(outflowSheet, copiedFile, getEmailSubjectForMessageId(gmailMessageId), gmailMessageId, "outflow");
+            // Mark the Drive File ID in the buffer sheet as 'DELETED'
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, 4).setValue('DELETED');
+            sheet.getRange(editedRow, 6).setValue(reasonText);
+            sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFD966');
+          } catch (e) {
+            Logger.log(`Error moving file to buffer: ${e.toString()}`);
+            ui.alert('Error', `Failed to move file "${changedFilename}" to buffer: ${e.message}`, ui.ButtonSet.OK);
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Active');
+          }
         }
+      } else {
+        setScriptEditFlag(true);
+        sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Active');
+        return;
+      }
+    }
 
-        ui.alert('Restoration Complete', `'${originalFilename}' has been successfully restored from buffer folder and re-logged.`, ui.ButtonSet.OK);
+    // --- ACTIVATE ACTION ---
+    else if (newStatus === 'Active' && oldStatus !== 'Active') {
+      if (!shouldShowPrompt()) {
+        return; // Prevent multiple prompts
+      }
+      
+      const response = ui.prompt(
+        'Reason for Activation',
+        `Please provide a reason for activating "${changedFilename}".`,
+        ui.ButtonSet.OK_CANCEL
+      );
+      
+      if (response.getSelectedButton() === ui.Button.OK) {
+        const reasonText = response.getResponseText().trim();
+        
+        // Only proceed if reason is provided
+        if (!reasonText) {
+          setScriptEditFlag(true);
+          sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
+          ui.alert('Error', 'Reason is required. Status reverted.', ui.ButtonSet.OK);
+          return;
+        }
+        
+        setScriptEditFlag(true);
+        sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(reasonText);
 
-      } catch (restoreError) {
-        Logger.log(`Error during restoration of '${originalFilename}': ${restoreError.toString()}`);
-        ui.alert('Restoration Failed', `An error occurred during restoration of '${originalFilename}': ${restoreError.message}. Status reverted to 'Delete'.`, ui.ButtonSet.OK);
-        sheet.getRange(row, col).setValue('Delete'); // Revert status if restoration fails
+        if (driveFileId && driveFileId !== 'DELETED') {
+          try {
+            // First check if the file is in Buffer/Deleted folder
+            let file = null;
+            let fileDate = null;
+            let financialYear = null;
+            let bufferActiveFolder = null;
+            let bufferDeletedFolder = null;
+            
+            // Try to find file in buffer deleted folder first
+            const currentFinancialYear = calculateFinancialYear(new Date());
+            bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, currentFinancialYear, "Deleted");
+            const filesInDeleted = bufferDeletedFolder.getFilesByName(changedFilename);
+            
+            if (filesInDeleted.hasNext()) {
+              // File found in deleted folder
+              file = filesInDeleted.next();
+              fileDate = file.getDateCreated();
+              financialYear = calculateFinancialYear(fileDate);
+              bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
+              bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Deleted");
+              
+              // Move from Buffer/Deleted to Buffer/Active
+              moveFileWithDriveApi(file.getId(), bufferActiveFolder.getId(), bufferDeletedFolder.getId());
+
+              // Determine if the file should be moved to inflow/outflow
+              const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
+              const invoiceStatus = aiResult.invoiceStatus || "unknown";
+              const emailSubject = getEmailSubjectForMessageId(gmailMessageId);
+              
+              if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
+                const month = getMonthFromDate(fileDate);
+                const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+
+                // Copy from Buffer/Active to the appropriate inflow/outflow folder
+                const copiedFile = file.makeCopy(changedFilename, flowFolder);
+                Logger.log(`Copied file ${changedFilename} from Buffer/Active to ${invoiceStatus} folder.`);
+
+                // Log in main and inflow/outflow sheets
+                logFileToMainSheet(mainSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus);
+                const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
+                logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus);
+              }
+              
+              // Update the driveFileId in the buffer sheet
+              setScriptEditFlag(true);
+              sheet.getRange(editedRow, 4).setValue(file.getId());
+            } else {
+              // File not in deleted folder, try to get by ID
+              try {
+                file = DriveApp.getFileById(driveFileId);
+                fileDate = file.getDateCreated();
+                financialYear = calculateFinancialYear(fileDate);
+                bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
+                
+                // Use AI to determine inflow/outflow/unknown
+                const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
+                const invoiceStatus = aiResult.invoiceStatus || "unknown";
+                const emailSubject = getEmailSubjectForMessageId(gmailMessageId);
+
+                // Copy to inflow/outflow folders if applicable
+                if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
+                  const month = getMonthFromDate(fileDate);
+                  const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+                  
+                  const copiedFile = file.makeCopy(changedFilename, flowFolder);
+                  Logger.log(`Copied file ${changedFilename} from Buffer/Active to ${invoiceStatus} folder.`);
+
+                  // Log in main and inflow/outflow sheets
+                  logFileToMainSheet(mainSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus);
+                  const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
+                  logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus);
+                } else {
+                  // Log in main sheet only
+                  logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus);
+                }
+              } catch (fileNotFoundError) {
+                Logger.log(`File with ID ${driveFileId} not found. Cannot activate.`);
+                ui.alert('Error', `File not found. Cannot activate "${changedFilename}".`, ui.ButtonSet.OK);
+                setScriptEditFlag(true);
+                sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
+                return;
+              }
+            }
+
+            // Clear any previous "Reason" or yellow background if successfully processed as Active
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, 6).setValue(reasonText);
+            sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground(null);
+            
+            // Update Drive File ID in buffer sheet if it was 'DELETED'
+            if (sheet.getRange(editedRow, 4).getValue() === 'DELETED') {
+              setScriptEditFlag(true);
+              sheet.getRange(editedRow, 4).setValue(file.getId());
+            }
+          } catch (e) {
+            Logger.log(`Error activating file: ${e.toString()}`);
+            ui.alert('Error', `Failed to activate file "${changedFilename}": ${e.message}`, ui.ButtonSet.OK);
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
+            return;
+          }
+        }
+      } else {
+        setScriptEditFlag(true);
+        sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
+        return;
       }
     }
   }
 }
 
-/**
- * Deletes a row from main and inflow/outflow sheets based on Drive File ID.
- * @param {string} companyName The company name (analogy or humane).
- * @param {string} driveFileId The Drive File ID of the row to delete.
- */
-function deleteRowFromConnectedSheets(companyName, driveFileId) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetsToUpdate = [
-    ss.getSheetByName(companyName),
-    ss.getSheetByName(`${companyName}-inflow`),
-    ss.getSheetByName(`${companyName}-outflow`)
-  ];
 
-  sheetsToUpdate.forEach(targetSheet => {
-    if (!targetSheet) {
-      Logger.log(`Sheet '${targetSheet}' not found for deletion.`);
-      return;
+function shouldShowPrompt() {
+  var props = PropertiesService.getScriptProperties();
+  var lastPrompt = Number(props.getProperty('lastPromptTime') || 0);
+  var now = Date.now();
+  if (now - lastPrompt < 3000) { // 3 seconds to prevent rapid fire
+    return false;
+  }
+  props.setProperty('lastPromptTime', String(now));
+  return true;
+}
+
+/**
+ * Moves a file from one folder to another using the Drive API (UrlFetchApp).
+ * @param {string} fileId - The ID of the file to move.
+ * @param {string} addParentId - The folder ID to add as parent.
+ * @param {string} removeParentId - The folder ID to remove as parent.
+ */
+function moveFileWithDriveApi(fileId, addParentId, removeParentId) {
+  var token = ScriptApp.getOAuthToken();
+  var url = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?addParents=' + addParentId + '&removeParents=' + removeParentId + '&fields=id,parents';
+  var options = {
+    method: 'patch',
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: 'Bearer ' + token
     }
-    const data = targetSheet.getDataRange().getValues();
-    let rowsToDelete = [];
-    for (let i = 1; i < data.length; i++) { // Start from 1 to skip header
-      if (data[i][1] === driveFileId) { // File ID is column B (index 1)
-        rowsToDelete.push(i + 1); // Store 1-indexed row number
-      }
-    }
-    // Delete rows from bottom up to avoid index issues
-    for (let i = rowsToDelete.length - 1; i >= 0; i--) {
-      targetSheet.deleteRow(rowsToDelete[i]);
-      Logger.log(`Deleted row with File ID ${driveFileId} from ${targetSheet.getName()}.`);
-    }
-  });
+  };
+  var response = UrlFetchApp.fetch(url, options);
+  if (response.getResponseCode() !== 200) {
+    throw new Error('Failed to move file: ' + response.getContentText());
+  }
+  return JSON.parse(response.getContentText());
 }
 
 /**
- * Function to handle cancellation requests from the UI
- * @param {string} processToken The token of the process to cancel
- * @returns {Object} Cancellation status
+ * Get or create the buffer subfolder for a company and financial year.
+ * @param {string} companyName - The name of the company (e.g., 'analogy', 'humane').
+ * @param {string} financialYear - The financial year (e.g., 'FY-23-24').
+ * @param {string} subfolderName - The name of the subfolder to create or get (e.g., 'Active' or 'Deleted').
+ * @returns {GoogleAppsScript.Drive.DriveFolder} The buffer subfolder.
  */
-function cancelProcess(processToken) {
-  if (!processToken) {
-    return { status: 'error', message: 'No process token provided for cancellation.' };
-  }
-  setCancellationToken(processToken);
-  return { status: 'success', message: 'Cancellation request sent. Process will stop at the next safe checkpoint.' };
-}
-
-/**
- * Updated progress function that accepts the process token for cancellation checks
- * @param {number} current
- * @param {number} total
- * @param {string} labelName
- * @param {string} processToken
- */
-function updateProgress(current, total, labelName, processToken) {
-  // This function doesn't actually do anything on the server-side,
-  // it just serves as a target for google.script.run from the client
-  // to allow the client to update its own UI.
-  Logger.log(`Progress for ${labelName}: ${current}/${total} (Token: ${processToken})`);
-}
-
-function ensureSheetHeaders(sheet, headers) {
-  const firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  if (firstRow.join(',') !== headers.join(',')) {
-    sheet.clear();
-    sheet.appendRow(headers);
-    sheet.getRange(1, 1, 1, headers.length)
-      .setFontWeight('bold')
-      .setBackground('#E8F0FE')
-      .setBorder(true, true, true, true, true, true);
-    sheet.setFrozenRows(1);
-  }
-  if (sheet.getLastColumn() > headers.length) {
-    sheet.deleteColumns(headers.length + 1, sheet.getLastColumn() - headers.length);
-  }
-}
-
-function testDrivePermission() {
-  // This will try to list the first file in your Drive (safe, just for permission)
-  var files = DriveApp.getFiles();
-  if (files.hasNext()) {
-    var file = files.next();
-    Logger.log("Found file: " + file.getName());
-  } else {
-    Logger.log("No files found in Drive.");
-  }
-}
-
-/**
- * Test function to trigger Drive permissions
- */
-function testDrivePermissions() {
-  try {
-    // Try to access Drive to trigger permission request
-    const testFolder = DriveApp.getRootFolder();
-    Logger.log("Drive access successful: " + testFolder.getName());
-    return "Drive permissions are working correctly!";
-  } catch (error) {
-    Logger.log("Drive permission error: " + error.toString());
-    return "Drive permission error: " + error.toString();
-  }
-}
-
-function createOnEditTrigger() {
-  ScriptApp.newTrigger('onEdit')
-    .forSpreadsheet(SpreadsheetApp.getActive())
-    .onEdit()
-    .create();
+function getOrCreateBufferSubfolder(companyName, financialYear, subfolderName) {
+  const bufferFolder = createBufferFolderStructure(companyName, financialYear);
+  return getOrCreateFolder(bufferFolder, subfolderName); // "Active" or "Deleted"
 }
