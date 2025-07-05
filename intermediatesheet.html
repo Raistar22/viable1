@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Field-Level File Verification</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f6fa;
+      margin: 0;
+      padding: 16px;
+      color: #333;
+    }
+
+    h2 {
+      text-align: center;
+      color: #1a73e8;
+      margin-bottom: 20px;
+      font-size: 18px;
+    }
+
+    .file-card {
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+      padding: 14px;
+      margin-bottom: 15px;
+    }
+
+    .field-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .field-label {
+      flex: 1 1 60%;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .field-label span {
+      font-weight: bold;
+      color: #555;
+    }
+
+    .verify-btn {
+      flex: 1 1 35%;
+      padding: 6px 10px;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+
+    .verify-btn:hover {
+      background-color: #155ab6;
+    }
+
+    a {
+      color: #1a73e8;
+      text-decoration: none;
+      word-break: break-word;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h2>📁 File Field Verifier</h2>
+
+  <!-- Add this inside <body> before the file-card div -->
+  <select id="sheetDropdown" onchange="onSheetSelect()">
+    <option value="">Select a sheet</option>
+  </select>
+  <select id="fileDropdown" onchange="onFileSelect()">
+    <option value="">Select a file</option>
+  </select>
+  <div id="fileDetails"></div>
+
+  <!-- Example File Entry -->
+  <div class="file-card" data-fileid="xyz123">
+    <div class="field-row">
+      <div class="field-label"><span>File Name:</span> Invoice_July.pdf</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'fileName')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>Drive URL:</span> <a href="https://drive.google.com/file/d/xyz123" target="_blank">Open File</a></div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'url')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>Date:</span> 2025-07-04</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'date')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>Size:</span> 300 KB</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'size')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>MIME Type:</span> application/pdf</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'mime')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>Gmail ID:</span> user@gmail.com</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'gmail')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>Status:</span> Pending</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'status')">Verify</button>
+    </div>
+    <div class="field-row">
+      <div class="field-label"><span>UI:</span> Finance</div>
+      <button class="verify-btn" onclick="verifyField('xyz123', 'ui')">Verify</button>
+    </div>
+  </div>
+
+  <script>
+    // Load sheet names into dropdown on page load
+    window.onload = function() {
+      google.script.run.withSuccessHandler(function(sheets) {
+        const sheetDropdown = document.getElementById('sheetDropdown');
+        sheetDropdown.innerHTML = '<option value="">Select a sheet</option>';
+        sheets.forEach(sheet => {
+          // Optionally filter for only main sheets (analogy/humane)
+          if (sheet === 'analogy' || sheet === 'humane') {
+            const option = document.createElement('option');
+            option.value = sheet;
+            option.text = sheet.charAt(0).toUpperCase() + sheet.slice(1);
+            sheetDropdown.appendChild(option);
+          }
+        });
+      }).getSubsheetNamesGAS();
+    };
+
+    function onSheetSelect() {
+      const selectedSheet = document.getElementById('sheetDropdown').value;
+      if (!selectedSheet) {
+        document.getElementById('fileDropdown').innerHTML = '<option value="">Select a file</option>';
+        document.getElementById('fileDetails').innerHTML = '';
+        return;
+      }
+      loadFilesDropdown(selectedSheet);
+    }
+
+    function loadFilesDropdown(sheetName) {
+      google.script.run.withSuccessHandler(function(files) {
+        const dropdown = document.getElementById('fileDropdown');
+        dropdown.innerHTML = '<option value="">Select a file</option>';
+        if (!files || files.length === 0) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.text = 'No files found';
+          dropdown.appendChild(option);
+          return;
+        }
+        files.forEach(file => {
+          const option = document.createElement('option');
+          option.value = file.fileId;
+          option.text = file.fileName;
+          dropdown.appendChild(option);
+        });
+      }).getMainSheetFiles(sheetName);
+      // Save current sheet for later use
+      window.currentSheet = sheetName;
+    }
+
+    function onFileSelect() {
+      const fileId = document.getElementById('fileDropdown').value;
+      if (!fileId) {
+        document.getElementById('fileDetails').innerHTML = '';
+        return;
+      }
+      google.script.run.withSuccessHandler(function(file) {
+        if (!file) {
+          document.getElementById('fileDetails').innerHTML = '<div>No details found.</div>';
+          return;
+        }
+        let html = `<div class="file-card" data-fileid="${file.fileId}">`;
+        html += buildFieldRow('File Name', file.fileName, file.fileId, 'File Name');
+        html += buildFieldRow('Drive URL', `<a href="${file.url}" target="_blank">Open File</a>`, file.fileId, 'File URL');
+        html += buildFieldRow('Date Created', file.date, file.fileId, 'Date Created');
+        html += buildFieldRow('Size', file.size, file.fileId, 'Size');
+        html += buildFieldRow('MIME Type', file.mimeType, file.fileId, 'Mime Type');
+        html += buildFieldRow('Gmail ID', file.gmailId, file.fileId, 'Gmail Message ID');
+        html += buildFieldRow('Status', file.status, file.fileId, 'invoice status');
+        html += buildFieldRow('UI', file.ui, file.fileId, 'UI');
+        html += `</div>`;
+        document.getElementById('fileDetails').innerHTML = html;
+      }).getFileDetailsById(window.currentSheet, fileId);
+    }
+
+    function buildFieldRow(label, value, fileId, field) {
+      return `
+        <div class="field-row">
+          <div class="field-label"><span>${label}:</span> ${value}</div>
+          <button class="verify-btn" onclick="verifyField('${fileId}', '${field}', this)">Verify</button>
+        </div>
+      `;
+    }
+
+    function verifyField(fileId, field, btn) {
+      google.script.run.withSuccessHandler(function(isVerified) {
+        if (isVerified) {
+          btn.style.backgroundColor = 'green';
+        } else {
+          btn.style.backgroundColor = '';
+          alert('Verification failed!');
+        }
+      }).verifyFieldData(window.currentSheet, fileId, field);
+    }
+  </script>
+</body>
+</html>

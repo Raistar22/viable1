@@ -34,8 +34,17 @@ var ATTACHMENT_COMPANY_FOLDER_MAP = {
 // --------------------------------------------------------
 
 // --- Sheet Header Definitions ---
-const BUFFER_SHEET_HEADERS = ['OriginalFileName', 'ChangedFilename', 'Invoice ID', 'Drive File ID', 'Gmail Message ID', 'Reason', 'Status', 'UI'];
-const BUFFER2_SHEET_HEADERS = ['File name', 'gmail id'];
+const BUFFER_SHEET_HEADERS = ['Date', 'OriginalFileName', 'ChangedFilename', 'Invoice ID', 'Drive File ID', 'Gmail Message ID', 'Reason', 'Status', 'UI'];
+const BUFFER2_SHEET_HEADERS = [
+  'Date',
+  'OriginalFileName',
+  'ChangedFilename',
+  'Invoice ID',
+  'Drive File ID',
+  'Gmail Message ID',
+  'Relevance',
+  'UI'
+];
 const MAIN_SHEET_HEADERS = [
   'File Name', 'File ID', 'File URL',
   'Date Created (Drive)', 'Last Updated (Drive)', 'Size (bytes)', 'Mime Type',
@@ -638,6 +647,7 @@ function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, i
     ui
   ]);
   Logger.log(`Logged file ${driveFile.getName()} (ID: ${driveFile.getId()}) with UI '${ui}' to ${logSheet.getName()}`);
+  sortSheetByDateDesc(logSheet, 4); // Sort by 'Date Created (Drive)' (column 4)
 }
 
 /**
@@ -732,6 +742,7 @@ const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[compa
       buffer2Sheet.setFrozenRows(1);
       buffer2Sheet.setColumnWidth(1, 300); // File name
       buffer2Sheet.setColumnWidth(2, 200); // Gmail id
+      setRelevanceDropdownValidation(buffer2Sheet);
       Logger.log(`Initialized Buffer2 sheet headers for ${buffer2SheetName}`);
     }
     
@@ -739,6 +750,7 @@ const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[compa
     if (buffer2Sheet.getLastColumn() > BUFFER2_SHEET_HEADERS.length) {
       buffer2Sheet.deleteColumns(BUFFER2_SHEET_HEADERS.length + 1, buffer2Sheet.getLastColumn() - BUFFER2_SHEET_HEADERS.length);
     }
+    setRelevanceDropdownValidation(buffer2Sheet);
   } catch (e) {
     Logger.log(`Warning: Could not initialize Buffer2 sheet for ${buffer2SheetName}: ${e.toString()}`);
     // Don't return error here as this is not critical for the main process
@@ -992,7 +1004,7 @@ try {
                     multiUniqueIdentifier
                   ];
                   bufferSheet.appendRow(multiInvoiceRowData);
-                  
+                  sortSheetByDateDesc(bufferSheet, 1);
                   const newMultiRowIndex = bufferSheet.getLastRow();
                   if (isDuplicateMultiFilename) {
                     bufferSheet.getRange(newMultiRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFFF00'); // Yellow for duplicate
@@ -1040,6 +1052,7 @@ try {
                     buffer2Sheet.setFrozenRows(1);
                     buffer2Sheet.setColumnWidth(1, 300); // File name
                     buffer2Sheet.setColumnWidth(2, 200); // Gmail id
+                    setRelevanceDropdownValidation(buffer2Sheet);
                   }
                   
                   // Ensure headers are correct
@@ -1052,13 +1065,22 @@ try {
                     buffer2Sheet.setFrozenRows(1);
                     buffer2Sheet.setColumnWidth(1, 300); // File name
                     buffer2Sheet.setColumnWidth(2, 200); // Gmail id
+                    setRelevanceDropdownValidation(buffer2Sheet);
                   }
                   
                   // Log the non-invoice file to Buffer2 sheet
                   buffer2Sheet.appendRow([
+                    new Date(),
+                    originalFilename,
                     changedFilename,
-                    messageId
+                    aiExtractedData.invoiceNumber || 'INV-Unknown',
+                    '', // Drive File ID (not available for Buffer2)
+                    messageId,
+                    '', // Relevance blank by default
+                    ''  // UI blank by default
                   ]);
+                  sortSheetByDateDesc(buffer2Sheet, 1);
+                  setRelevanceDropdownValidation(buffer2Sheet);
                   
                   Logger.log(`Non-invoice file ${changedFilename} moved to Buffer2 folder and logged to ${buffer2SheetName}`);
                   
@@ -1179,6 +1201,7 @@ try {
 
               // Append to buffer sheet with AI-extracted data
               const rowData = [
+                new Date(),
                 originalFilename,
                 changedFilename,
                 aiExtractedData.invoiceNumber || 'INV-Unknown', // Use AI-extracted invoice number
@@ -1189,6 +1212,7 @@ try {
                 uniqueIdentifier                         // UI (unique identifier)
               ];
               bufferSheet.appendRow(rowData);
+              sortSheetByDateDesc(bufferSheet, 1);
               const newRowIndex = bufferSheet.getLastRow();
 
               // If it's a duplicate, color the entire row yellow
@@ -1583,6 +1607,9 @@ function processBufferFilesAndLog(companyName) {
   }
 
   Logger.log(`Completed processing of '${companyName}-buffer'.`);
+  sortSheetByDateDesc(mainSheet, 4); // Sort by 'Date Created (Drive)' (column 4)
+  sortSheetByDateDesc(inflowSheet, 4); // Sort by 'Date Created (Drive)' (column 4)
+  sortSheetByDateDesc(outflowSheet, 4); // Sort by 'Date Created (Drive)' (column 4)
 }
 
 /**
@@ -2569,4 +2596,21 @@ function populateMissingUIValues(companyName) {
   });
   
   Logger.log(`Completed populating missing UI values for company: ${companyName}`);
+}
+
+// Helper to set dropdown for 'Relevance' column in Buffer2
+function setRelevanceDropdownValidation(sheet) {
+  const relevanceCol = BUFFER2_SHEET_HEADERS.indexOf('Relevance') + 1;
+  const range = sheet.getRange(2, relevanceCol, sheet.getMaxRows() - 1); // Exclude header
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(['Yes', 'No'], true).build();
+  range.setDataValidation(rule);
+  Logger.log(`Relevance dropdown validation applied to ${sheet.getName()}`);
+}
+
+// Helper to sort a sheet by a date column (descending, latest first)
+function sortSheetByDateDesc(sheet, dateCol) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+  // Sort range: all rows except header
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn())
+    .sort({column: dateCol, ascending: false});
 }
