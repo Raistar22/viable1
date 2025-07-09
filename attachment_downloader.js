@@ -34,7 +34,7 @@ var ATTACHMENT_COMPANY_FOLDER_MAP = {
 // --------------------------------------------------------
 
 // --- Sheet Header Definitions ---
-const BUFFER_SHEET_HEADERS = ['Date', 'OriginalFileName', 'ChangedFilename', 'Invoice ID', 'Drive File ID', 'Gmail Message ID', 'Reason', 'Status', 'UI'];
+const BUFFER_SHEET_HEADERS = ['Date', 'OriginalFileName', 'ChangedFilename', 'Invoice ID', 'Drive File ID', 'Gmail Message ID', 'Reason', 'Status', 'UI', 'Repeated', 'Invoice Count', 'Attachment ID', 'Email ID'];
 const BUFFER2_SHEET_HEADERS = [
   'Date',
   'OriginalFileName',
@@ -48,7 +48,8 @@ const BUFFER2_SHEET_HEADERS = [
 const MAIN_SHEET_HEADERS = [
   'File Name', 'File ID', 'File URL',
   'Date Created (Drive)', 'Last Updated (Drive)', 'Size (bytes)', 'Mime Type',
-  'Email Subject', 'Gmail Message ID', 'invoice status', 'UI'
+  'Email Subject', 'Gmail Message ID', 'invoice status', 'UI',
+  'Date', 'Month', 'FY', 'GST', 'TDS', 'OT', 'NA'
 ];
 
 // Global counter for unique identifiers
@@ -626,13 +627,30 @@ function findAttachmentInMessage(message, attachmentName) {
  * @param {string} companyName The company name to get UI from buffer sheet.
  * @param {string} providedUI Optional UI to use instead of looking up from buffer sheet.
  */
-function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, invoiceStatus, companyName, providedUI = null) {
-  // Use provided UI if available, otherwise get from buffer sheet
+function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, invoiceStatus, companyName, providedUI = null, extraData = {}) {
+  // Ensure headers are present in the first row
+  const firstRow = logSheet.getRange(1, 1, 1, MAIN_SHEET_HEADERS.length).getValues()[0];
+  if (firstRow.join(',') !== MAIN_SHEET_HEADERS.join(',')) {
+    logSheet.clear();
+    logSheet.appendRow(MAIN_SHEET_HEADERS);
+    logSheet.getRange(1, 1, 1, MAIN_SHEET_HEADERS.length)
+      .setFontWeight('bold').setBackground('#E8F0FE').setBorder(true, true, true, true, true, true);
+    logSheet.setFrozenRows(1);
+  }
   let ui = providedUI;
   if (!ui) {
     ui = getUIFromBufferSheet(companyName, driveFile.getName(), driveFile.getId());
   }
-  
+  // Extract extra fields
+  const {
+    date = '',
+    month = '',
+    fy = '',
+    gst = '',
+    tds = '',
+    ot = '',
+    na = ''
+  } = extraData;
   logSheet.appendRow([
     driveFile.getName(),
     driveFile.getId(),
@@ -644,7 +662,14 @@ function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, i
     emailSubject,
     gmailMessageId,
     invoiceStatus,
-    ui
+    ui,
+    date,
+    month,
+    fy,
+    gst,
+    tds,
+    ot,
+    na
   ]);
   Logger.log(`Logged file ${driveFile.getName()} (ID: ${driveFile.getId()}) with UI '${ui}' to ${logSheet.getName()}`);
   sortSheetByDateDesc(logSheet, 4); // Sort by 'Date Created (Drive)' (column 4)
@@ -711,6 +736,10 @@ const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[compa
       bufferSheet.setColumnWidth(6, 250); // Reason
       bufferSheet.setColumnWidth(7, 80);  // Status
       bufferSheet.setColumnWidth(8, 120); // UI
+      bufferSheet.setColumnWidth(9, 120); // Repeated
+      bufferSheet.setColumnWidth(10, 120); // Invoice Count
+      bufferSheet.setColumnWidth(11, 120); // Attachment ID
+      bufferSheet.setColumnWidth(12, 120); // Email ID
     }
     // Remove any extra columns if present
     if (bufferSheet.getLastColumn() > BUFFER_SHEET_HEADERS.length) {
@@ -948,7 +977,15 @@ try {
                         mainSheet = ss.insertSheet(companyName);
                         mainSheet.appendRow(MAIN_SHEET_HEADERS);
                       }
-                      logFileToMainSheet(mainSheet, multiInvoiceFile, emailSubject, messageId, invoiceStatus, companyName, multiUniqueIdentifier);
+                      logFileToMainSheet(mainSheet, multiInvoiceFile, emailSubject, messageId, invoiceStatus, companyName, multiUniqueIdentifier, {
+                        date: now.toISOString().split('T')[0],
+                        month: getMonthFromDate(now),
+                        fy: calculateFinancialYear(now),
+                        gst: aiExtractedData.gst || '',
+                        tds: aiExtractedData.tds || '',
+                        ot: aiExtractedData.ot || '',
+                        na: aiExtractedData.na || ''
+                      });
                       
                       // Handle inflow/outflow for each invoice
                       if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
@@ -973,7 +1010,15 @@ try {
                           flowSheet.setFrozenRows(1);
                         }
                         if (flowFile) {
-                          logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus, companyName, multiUniqueIdentifier);
+                          logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus, companyName, multiUniqueIdentifier, {
+                            date: now.toISOString().split('T')[0],
+                            month: getMonthFromDate(now),
+                            fy: calculateFinancialYear(now),
+                            gst: aiExtractedData.gst || '',
+                            tds: aiExtractedData.tds || '',
+                            ot: aiExtractedData.ot || '',
+                            na: aiExtractedData.na || ''
+                          });
                         }
                       }
                       
@@ -1001,7 +1046,11 @@ try {
                     messageId,
                     `Multi-invoice: ${invoiceIndex + 1}/${aiExtractedData.invoiceCount} | ${invoiceData.documentType || 'document'} | Amount: ${invoiceData.amount || '0.00'}`,
                     'Active',
-                    multiUniqueIdentifier
+                    multiUniqueIdentifier,
+                    '',
+                    aiExtractedData.invoiceCount || 1,
+                    attachment.getId ? attachment.getId() : '',
+                    messageId
                   ];
                   bufferSheet.appendRow(multiInvoiceRowData);
                   sortSheetByDateDesc(bufferSheet, 1);
@@ -1077,7 +1126,11 @@ try {
                     '', // Drive File ID (not available for Buffer2)
                     messageId,
                     '', // Relevance blank by default
-                    ''  // UI blank by default
+                    '',  // UI blank by default
+                    '',
+                    aiExtractedData.invoiceCount || 1,
+                    attachment.getId ? attachment.getId() : '',
+                    messageId
                   ]);
                   sortSheetByDateDesc(buffer2Sheet, 1);
                   setRelevanceDropdownValidation(buffer2Sheet);
@@ -1138,7 +1191,15 @@ try {
                   mainSheet = ss.insertSheet(companyName);
                   mainSheet.appendRow(MAIN_SHEET_HEADERS);
                 }
-                logFileToMainSheet(mainSheet, driveFile, emailSubject, messageId, invoiceStatus, companyName, uniqueIdentifier);
+                logFileToMainSheet(mainSheet, driveFile, emailSubject, messageId, invoiceStatus, companyName, uniqueIdentifier, {
+                  date: now.toISOString().split('T')[0],
+                  month: getMonthFromDate(now),
+                  fy: calculateFinancialYear(now),
+                  gst: aiExtractedData.gst || '',
+                  tds: aiExtractedData.tds || '',
+                  ot: aiExtractedData.ot || '',
+                  na: aiExtractedData.na || ''
+                });
 
                 // If inflow/outflow, create a true copy in the inflow/outflow folder
                 if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
@@ -1185,7 +1246,15 @@ try {
                     }
                   }
                   if (flowFile) {
-                    logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus, companyName, uniqueIdentifier);
+                    logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus, companyName, uniqueIdentifier, {
+                      date: now.toISOString().split('T')[0],
+                      month: getMonthFromDate(now),
+                      fy: calculateFinancialYear(now),
+                      gst: aiExtractedData.gst || '',
+                      tds: aiExtractedData.tds || '',
+                      ot: aiExtractedData.ot || '',
+                      na: aiExtractedData.na || ''
+                    });
                   }
                 }
               } else {
@@ -1209,7 +1278,11 @@ try {
                 messageId,                               // Gmail Message ID
                 `AI: ${aiExtractedData.documentType || 'document'} | Amount: ${aiExtractedData.amount || '0.00'}`, // Enhanced reason with AI data
                 'Active',                                // Default Status (Active)
-                uniqueIdentifier                         // UI (unique identifier)
+                uniqueIdentifier,                         // UI (unique identifier)
+                '',
+                aiExtractedData.invoiceCount || 1,
+                attachment.getId ? attachment.getId() : '',
+                messageId
               ];
               bufferSheet.appendRow(rowData);
               sortSheetByDateDesc(bufferSheet, 1);
@@ -1521,7 +1594,15 @@ function processBufferFilesAndLog(companyName) {
 
 
         // 5. Log to main sheet (sheet only, no drive storage)
-        logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier);
+        logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
+          date: now.toISOString().split('T')[0],
+          month: getMonthFromDate(now),
+          fy: calculateFinancialYear(now),
+          gst: aiExtractedData.gst || '',
+          tds: aiExtractedData.tds || '',
+          ot: aiExtractedData.ot || '',
+          na: aiExtractedData.na || ''
+        });
 
         // 6. Copy to inflow or outflow if appropriate (both sheet and drive)
         if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
@@ -1541,7 +1622,15 @@ function processBufferFilesAndLog(companyName) {
           const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
           
           // Use logFileToMainSheet which gets UI from buffer sheet
-          logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier);
+          logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
+            date: now.toISOString().split('T')[0],
+            month: getMonthFromDate(now),
+            fy: calculateFinancialYear(now),
+            gst: aiExtractedData.gst || '',
+            tds: aiExtractedData.tds || '',
+            ot: aiExtractedData.ot || '',
+            na: aiExtractedData.na || ''
+          });
         }
 
         // Clear any previous "Reason" or yellow background if successfully processed as Active
@@ -1794,55 +1883,7 @@ function callGeminiAPIInternal(fileBlob, fileName) {
     const mimeType = fileBlob.getContentType();
     
     // Enhanced prompt for multi-invoice detection and extraction
-    const prompt = `Analyze this document carefully and determine if it contains single or multiple invoices/bills/receipts.
-
-If SINGLE invoice/document, respond with:
-{
-  "isMultiInvoice": false,
-  "invoiceData": {
-    "date": "YYYY-MM-DD format date",
-    "vendorName": "Company or vendor name (clean, no special characters)",
-    "invoiceNumber": "Invoice/bill/reference number",
-    "amount": "Total amount as number (no currency symbols)",
-    "invoiceStatus": "inflow or outflow or unknown",
-    "documentType": "type of document (invoice, receipt, bill, etc.)"
-  }
-}
-
-If MULTIPLE invoices/documents, respond with:
-{
-  "isMultiInvoice": true,
-  "invoiceData": [
-    {
-      "date": "YYYY-MM-DD format date",
-      "vendorName": "Company or vendor name (clean, no special characters)",
-      "invoiceNumber": "Invoice/bill/reference number",
-      "amount": "Amount as number (no currency symbols)",
-      "invoiceStatus": "inflow or outflow or unknown",
-      "documentType": "type of document (invoice, receipt, bill, etc.)",
-      "pageNumber": "Page number or position in document"
-    },
-    {
-      "date": "YYYY-MM-DD format date",
-      "vendorName": "Company or vendor name (clean, no special characters)",
-      "invoiceNumber": "Invoice/bill/reference number",
-      "amount": "Amount as number (no currency symbols)",
-      "invoiceStatus": "inflow or outflow or unknown",
-      "documentType": "type of document (invoice, receipt, bill, etc.)",
-      "pageNumber": "Page number or position in document"
-    }
-  ]
-}
-
-IMPORTANT RULES:
-1. Look for multiple invoice numbers, different vendor names, different dates, or separate line items that represent distinct transactions
-2. For invoiceStatus: 'inflow' = money coming in (sales invoices, receipts), 'outflow' = money going out (purchase invoices, bills, expenses)
-3. Clean vendor names (remove special characters, keep only alphanumeric and spaces)
-4. Each invoice must have a unique invoice number - if numbers are the same, it's likely a single invoice
-5. If any field cannot be determined, use appropriate defaults: date='${getCurrentDateString()}', vendorName='UnknownVendor', invoiceNumber='INV-Unknown', amount='0.00'
-6. Amount should be just the number without currency symbols
-7. For multi-invoice files, ensure each invoice has distinct data
-8. Respond ONLY with valid JSON, no additional text`;
+    const prompt = `Analyze this document carefully and determine if it contains single or multiple invoices/bills/receipts.\n\nIf SINGLE invoice/document, respond with:\n{\n  "isMultiInvoice": false,\n  "invoiceData": {\n    "date": "YYYY-MM-DD format date",\n    "vendorName": "Company or vendor name (clean, no special characters)",\n    "invoiceNumber": "Invoice/bill/reference number",\n    "amount": "Total amount as number (no currency symbols)",\n    "invoiceStatus": "inflow or outflow or unknown",\n    "documentType": "type of document (invoice, receipt, bill, etc.)",\n    "gst": "GST number if present, else blank",\n    "tds": "TDS value if present, else blank"\n  }\n}\n\nIf MULTIPLE invoices/documents, respond with:\n{\n  "isMultiInvoice": true,\n  "invoiceData": [\n    {\n      "date": "YYYY-MM-DD format date",\n      "vendorName": "Company or vendor name (clean, no special characters)",\n      "invoiceNumber": "Invoice/bill/reference number",\n      "amount": "Amount as number (no currency symbols)",\n      "invoiceStatus": "inflow or outflow or unknown",\n      "documentType": "type of document (invoice, receipt, bill, etc.)",\n      "pageNumber": "Page number or position in document",\n      "gst": "GST number if present, else blank",\n      "tds": "TDS value if present, else blank"\n    }\n  ]\n}\n\nIMPORTANT RULES:\n1. Look for multiple invoice numbers, different vendor names, different dates, or separate line items that represent distinct transactions\n2. For invoiceStatus: 'inflow' = money coming in (sales invoices, receipts), 'outflow' = money going out (purchase invoices, bills, expenses)\n3. Clean vendor names (remove special characters, keep only alphanumeric and spaces)\n4. Each invoice must have a unique invoice number - if numbers are the same, it's likely a single invoice\n5. If any field cannot be determined, use appropriate defaults: date='${getCurrentDateString()}', vendorName='UnknownVendor', invoiceNumber='INV-Unknown', amount='0.00'\n6. Amount should be just the number without currency symbols\n7. For multi-invoice files, ensure each invoice has distinct data\n8. Respond ONLY with valid JSON, no additional text`;
     
     const payload = {
       contents: [{
@@ -1984,7 +2025,11 @@ function validateAndSanitizeExtractedData(data, fileName) {
     invoiceNumber: sanitizeInvoiceNumber(data.invoiceNumber) || extractInvoiceIdFromFilename(fileName) || 'INV-Unknown',
     amount: validateAmount(data.amount) || '0.00',
     invoiceStatus: validateInvoiceStatus(data.invoiceStatus) || 'unknown',
-    documentType: data.documentType || 'document'
+    documentType: data.documentType || 'document',
+    gst: data.gst || '',
+    tds: data.tds || '',
+    ot: data.ot || '',
+    na: data.na || ''
   };
 }
 
@@ -2015,7 +2060,11 @@ function fallbackDataExtraction(fileBlob, fileName) {
     invoiceNumber: extractInvoiceIdFromFilename(fileName) || 'INV-Unknown',
     amount: '0.00',
     invoiceStatus: invoiceStatus,
-    documentType: 'document'
+    documentType: 'document',
+    gst: '',
+    tds: '',
+    ot: '',
+    na: ''
   };
   
   return {
@@ -2039,7 +2088,11 @@ function extractDataFromText(text, fileName) {
     invoiceNumber: extractInvoiceIdFromFilename(fileName) || 'INV-Unknown',
     amount: '0.00',
     invoiceStatus: 'unknown',
-    documentType: 'document'
+    documentType: 'document',
+    gst: '',
+    tds: '',
+    ot: '',
+    na: ''
   };
   
   // Try to extract date (various formats)
@@ -2235,6 +2288,97 @@ function onEdit(e) {
   const range = e.range;
   const sheet = range.getSheet();
   const sheetName = sheet.getName();
+
+  // --- NEW: Handle Buffer2 sheet 'Relevance' column edits ---
+  if (
+    sheetName.endsWith('-buffer2') &&
+    range.getColumn() === BUFFER2_SHEET_HEADERS.indexOf('Relevance') + 1 &&
+    range.getNumRows() === 1 &&
+    range.getNumColumns() === 1
+  ) {
+    const companyName = sheetName.replace('-buffer2', '');
+    const editedRow = range.getRow();
+    const newRelevance = e.value;
+    const oldRelevance = e.oldValue;
+    if (editedRow === 1 || newRelevance === oldRelevance) return;
+    if (newRelevance !== 'No') return;
+
+    const rowData = sheet.getRange(editedRow, 1, 1, BUFFER2_SHEET_HEADERS.length).getValues()[0];
+    const date = rowData[0];
+    const originalFilename = rowData[1];
+    const changedFilename = rowData[2];
+    const invoiceId = rowData[3];
+    let driveFileId = rowData[4];
+    const gmailMessageId = rowData[5];
+    const ui = SpreadsheetApp.getUi();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // Find the file in Buffer2 folder (by changedFilename)
+    try {
+      // Find the correct financial year (try from date, else current)
+      let fileDate = new Date(date);
+      if (isNaN(fileDate.getTime())) fileDate = new Date();
+      const financialYear = calculateFinancialYear(fileDate);
+      const buffer2Folder = createBuffer2FolderStructure(companyName, financialYear);
+      const files = buffer2Folder.getFilesByName(changedFilename);
+      if (!files.hasNext()) {
+        ui.alert('Error', `File ${changedFilename} not found in Buffer2 folder.`, ui.ButtonSet.OK);
+        return;
+      }
+      const file = files.next();
+      driveFileId = file.getId();
+
+      // Move file to Buffer/Active
+      const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, 'Active');
+      moveFileWithDriveApi(file.getId(), bufferActiveFolder.getId(), buffer2Folder.getId());
+
+      // Add log to buffer sheet if not already present
+      const bufferSheet = ss.getSheetByName(`${companyName}-buffer`);
+      let alreadyLogged = false;
+      if (bufferSheet) {
+        const bufferData = bufferSheet.getDataRange().getValues();
+        for (let i = 1; i < bufferData.length; i++) {
+          if (bufferData[i][1] === changedFilename || bufferData[i][3] === driveFileId) {
+            alreadyLogged = true;
+            break;
+          }
+        }
+      }
+      if (!alreadyLogged) {
+        // Generate UI if not present
+        let uniqueIdentifier = rowData[7];
+        if (!uniqueIdentifier) {
+          uniqueIdentifier = generateUniqueIdentifierForFile(driveFileId);
+        }
+        // Append to buffer sheet
+        bufferSheet.appendRow([
+          new Date(),
+          originalFilename,
+          changedFilename,
+          invoiceId,
+          driveFileId,
+          gmailMessageId,
+          'Moved from Buffer2 (Relevance=No)',
+          'Active',
+          uniqueIdentifier,
+          '',
+          aiExtractedData.invoiceCount || 1,
+          attachment.getId ? attachment.getId() : '',
+          messageId
+        ]);
+        sortSheetByDateDesc(bufferSheet, 1);
+      }
+
+      // Remove the row from buffer2 sheet
+      setScriptEditFlag(true);
+      sheet.deleteRow(editedRow);
+      ui.alert('File moved to Buffer/Active and logged in buffer sheet.');
+    } catch (err) {
+      Logger.log(`Error moving file from Buffer2 to Buffer: ${err.toString()}`);
+      ui.alert('Error', `Failed to move file from Buffer2 to Buffer: ${err.message}`, ui.ButtonSet.OK);
+    }
+    return;
+  }
 
   // Only handle Status column changes in buffer sheets
   if (
@@ -2614,3 +2758,4 @@ function sortSheetByDateDesc(sheet, dateCol) {
   sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn())
     .sort({column: dateCol, ascending: false});
 }
+  

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Buffer2sidebar</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #333;
+    }
+
+    .container {
+      max-width: 380px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      color: #2c3e50;
+      font-size: 24px;
+      margin-bottom: 24px;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .section {
+      margin-bottom: 24px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      border: 1px solid #e9ecef;
+    }
+
+    .section h3 {
+      color: #495057;
+      font-size: 16px;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+
+    .input-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #495057;
+      font-size: 14px;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    input[type="number"]:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      padding: 10px 14px;
+      border: 2px solid #e9ecef;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+      flex: 1;
+      justify-content: center;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+
+    .radio-option label {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 500;
+      color: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .radio-option:hover {
+      background: #f8f9fa;
+      border-color: #667eea;
+    }
+
+    .radio-option.selected {
+      background: #667eea;
+      border-color: #667eea;
+      color: white;
+    }
+
+    input[type="radio"] {
+      margin: 0;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin-bottom: 12px;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      text-align: center;
+      display: none;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      margin-top: 16px;
+    }
+
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    .entry-count {
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #e8f5e8;
+      border: 1px solid #c3e6cb;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .count-display {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .count-label {
+      font-size: 14px;
+      color: #495057;
+      font-weight: 500;
+    }
+
+    .count-number {
+      font-size: 18px;
+      font-weight: 700;
+      color: #28a745;
+      background: white;
+      padding: 4px 12px;
+      border-radius: 20px;
+      min-width: 30px;
+      display: inline-block;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Buffer2sidebar</h1>
+    
+    <!-- Document Count Update Section -->
+    <div class="section">
+      <h3>📄 Update Document Count</h3>
+      <div class="input-group">
+        <label for="docCount">Number of Documents:</label>
+        <input type="number" id="docCount" min="0" placeholder="Enter document count">
+      </div>
+      <button class="btn" onclick="updateDocumentCount()">Update Document Count</button>
+    </div>
+
+    <!-- Push to Buffer Section -->
+    <div class="section">
+      <h3>📤 Push to Buffer</h3>
+      <div class="input-group">
+        <label>Select Target Sheet:</label>
+        <div class="radio-group">
+          <div class="radio-option" onclick="selectSheet('analogy')">
+            <input type="radio" name="targetSheet" value="analogy" id="analogy">
+            <label for="analogy">Analogy</label>
+          </div>
+          <div class="radio-option" onclick="selectSheet('humane')">
+            <input type="radio" name="targetSheet" value="humane" id="humane">
+            <label for="humane">Humane</label>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Entry Count Display -->
+      <div class="entry-count" id="entryCount" style="display: none;">
+        <div class="count-display">
+          <span class="count-label">Current Entries:</span>
+          <span class="count-number" id="countNumber">0</span>
+        </div>
+      </div>
+      
+      <button class="btn" onclick="pushToBuffer()" id="pushBtn" disabled>Push Relevant Entries</button>
+    </div>
+
+    <!-- Status and Loading -->
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div>Processing...</div>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    let selectedSheet = null;
+
+    function selectSheet(sheetType) {
+      selectedSheet = sheetType;
+      
+      // Update radio button selection
+      document.querySelectorAll('input[name="targetSheet"]').forEach(radio => {
+        radio.checked = radio.value === sheetType;
+      });
+      
+      // Update visual selection
+      document.querySelectorAll('.radio-option').forEach(option => {
+        option.classList.remove('selected');
+      });
+      event.currentTarget.classList.add('selected');
+      
+      // Enable push button
+      document.getElementById('pushBtn').disabled = false;
+      
+      // Show entry count section and load count
+      document.getElementById('entryCount').style.display = 'block';
+      loadEntryCount(sheetType);
+    }
+
+    function loadEntryCount(sheetType) {
+      const sheetName = sheetType === 'analogy' ? 'analogy-buffer2' : 'humane-buffer2';
+      
+      // Show loading state
+      document.getElementById('countNumber').textContent = '...';
+      
+      google.script.run
+        .withSuccessHandler(function(count) {
+          document.getElementById('countNumber').textContent = count;
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('countNumber').textContent = 'Error';
+          console.error('Error loading entry count:', error);
+        })
+        .getEntryCount(sheetName);
+    }
+
+    function updateDocumentCount() {
+      const docCount = document.getElementById('docCount').value;
+      
+      if (!docCount || docCount < 0) {
+        showStatus('Please enter a valid document count', 'error');
+        return;
+      }
+      
+      showLoading(true);
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showLoading(false);
+          showStatus(`Document count updated to ${docCount}`, 'success');
+          document.getElementById('docCount').value = '';
+        })
+        .withFailureHandler(function(error) {
+          showLoading(false);
+          showStatus(`Error updating document count: ${error.message}`, 'error');
+        })
+        .updateDocumentCount(parseInt(docCount));
+    }
+
+    function pushToBuffer() {
+      if (!selectedSheet) {
+        showStatus('Please select a target sheet first', 'error');
+        return;
+      }
+      
+      showLoading(true);
+      
+      const sheetName = selectedSheet === 'analogy' ? 'analogy-buffer2' : 'humane-buffer2';
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showLoading(false);
+          showStatus(`Successfully pushed ${result.count} entries to ${sheetName}`, 'success');
+          // Refresh the entry count after successful push
+          loadEntryCount(selectedSheet);
+        })
+        .withFailureHandler(function(error) {
+          showLoading(false);
+          showStatus(`Error pushing to buffer: ${error.message}`, 'error');
+        })
+        .pushRelevantEntries(sheetName);
+    }
+
+    function showStatus(message, type) {
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = message;
+      statusEl.className = `status ${type}`;
+      statusEl.style.display = 'block';
+      
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+      }, 5000);
+    }
+
+    function showLoading(show) {
+      document.getElementById('loading').style.display = show ? 'block' : 'none';
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      showStatus('Buffer2sidebar tool loaded successfully', 'info');
+    });
+  </script>
+</body>
+</html>

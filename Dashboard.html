@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+        background-color: #f4f6fa;
+      }
+
+      .header {
+        background-color: #1e63ff;
+        color: white;
+        padding: 20px;
+        text-align: center;
+      }
+
+      .header h1 {
+        margin: 0;
+      }
+
+      .status-bar {
+        background-color: #ffffff;
+        padding: 10px 20px;
+        border-bottom: 1px solid #e0e0e0;
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        font-size: 14px;
+      }
+
+      .status-bar span {
+        padding: 4px 10px;
+        border-radius: 20px;
+      }
+
+      .healthy {
+        background-color: #d4edda;
+        color: #155724;
+      }
+
+      .main {
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .row {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+
+      .card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        flex: 1;
+        min-width: 280px;
+      }
+
+      .card h3 {
+        margin-top: 0;
+      }
+
+      .btn {
+        display: inline-block;
+        padding: 10px 14px;
+        margin-top: 10px;
+        background-color: #1e63ff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        text-decoration: none;
+        font-size: 14px;
+      }
+
+      .btn:hover {
+        background-color: #0e4acc;
+      }
+
+      .client-card {
+        background-color: #2d2f3e;
+        color: white;
+        flex: 1;
+        min-width: 280px;
+      }
+
+      .client-card h4 {
+        margin: 0 0 10px 0;
+      }
+
+      .tag {
+        font-size: 12px;
+        background-color: #17a2b8;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 3px;
+        margin-left: 8px;
+      }
+
+      .footer-note {
+        font-size: 12px;
+        text-align: center;
+        color: #888;
+        margin-top: 40px;
+      }
+      .blinking-light {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #28a745;
+        margin-right: 8px;
+        vertical-align: middle;
+        box-shadow: 0 0 8px #28a74599;
+        animation: blink-green 1.2s infinite;
+      }
+      @keyframes blink-green {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>📊 FinTech Automation</h1>
+      <p>Automated document processing and financial data management</p>
+    </div>
+
+    <div class="status-bar">
+      <span class="blinking-light"></span><span class="healthy">System healthy</span>
+      <span class="healthy"><span id="activeClients">--</span> Active Clients</span>
+    </div>
+
+    <div class="main">
+      <div class="row">
+        <div class="card">
+          <h3>Clients Overview</h3>
+          <p>Total Clients: <strong id="totalClients">--</strong></p>
+          <p>Active: <strong id="activeClientsOverview">--</strong></p>
+          <p>Status: <span class="healthy">Healthy</span></p>
+        </div>
+
+        <div class="card">
+          <h3>Quick Actions</h3>
+          <button class="btn" onclick="google.script.run.processAllGmail()">📥 Process All Gmail</button><br />
+          <button class="btn" onclick="google.script.run.systemDiagnostics()">🛠 System Diagnostics</button><br />
+          <button class="btn" onclick="reloadDashboard()">🔄 Refresh Dashboard</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card client-card">
+          <h4>📁 Analogy <span class="tag">client-analogy</span></h4>
+          <p>📧 Pending Gmail: <strong id="analogyPending">--</strong></p>
+          <p>📂 Processed: <strong id="analogyProcessed">--</strong></p>
+          <p>🔄 Last Updated: <span id="analogyUpdated">--</span></p>
+          <div>
+            <button class="btn">Dashboard</button>
+            <button class="btn" onclick="window.open('https://docs.google.com/spreadsheets/d/1nLFiCn-hQs_28T-5JEFc8-e3nq9DlZUKyt1PMsaUN-Y/edit?pli=1&gid=0#gid=0', '_blank')">Sheet</button>
+            <button class="btn" onclick="window.open('https://drive.google.com/drive/folders/160pN2zDCb9UQbwIXqgggdTjLUrFM2cM3', '_blank')">Folder</button>
+          </div>
+        </div>
+
+        <div class="card client-card">
+          <h4>📁 Humane <span class="tag">client-humane</span></h4>
+          <p>📧 Pending Gmail: <strong id="humanePending">--</strong></p>
+          <p>📂 Processed: <strong id="humaneProcessed">--</strong></p>
+          <p>🔄 Last Updated: <span id="humaneUpdated">--</span></p>
+          <div>
+            <button class="btn">Dashboard</button>
+            <button class="btn" onclick="window.open('https://docs.google.com/spreadsheets/d/1nLFiCn-hQs_28T-5JEFc8-e3nq9DlZUKyt1PMsaUN-Y/edit?pli=1&gid=524686480#gid=524686480', '_blank')">Sheet</button>
+            <button class="btn" onclick="window.open('https://drive.google.com/drive/folders/1E6ijhWhdYykymN0MEUINd9jETmdM2sAt', '_blank')">Folder</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Recent Activity</h3>
+        <p>Analogy: <strong id="analogyPending">--</strong> pending operations <span class="healthy">✓ healthy</span></p>
+        <p>Humane: <strong id="humanePending">--</strong> pending operations <span class="healthy">✓ healthy</span></p>
+      </div>
+
+      <div class="footer-note">
+        © 2025 Viable Ideas · Dashboard Interface
+      </div>
+    </div>
+
+    <script>
+      function reloadDashboard() {
+        location.reload();
+      }
+
+      function loadDashboard() {
+        google.script.run.withSuccessHandler(renderDashboard).getDashboardData();
+      }
+
+      function renderDashboard(data) {
+        document.getElementById("totalClients").innerText = data.totalClients;
+        document.getElementById("activeClients").innerText = data.activeClients;
+        document.getElementById("activeClientsOverview").innerText = data.activeClients;
+
+        const analogy = data.clients.analogy;
+        const humane = data.clients.humane;
+
+        document.getElementById("analogyPending").innerText = analogy.pending;
+        document.getElementById("analogyProcessed").innerText = analogy.processed;
+        document.getElementById("analogyUpdated").innerText = analogy.lastUpdated;
+
+        document.getElementById("humanePending").innerText = humane.pending;
+        document.getElementById("humaneProcessed").innerText = humane.processed;
+        document.getElementById("humaneUpdated").innerText = humane.lastUpdated;
+      }
+
+      window.onload = loadDashboard;
+    </script>
+  </body>
+</html>

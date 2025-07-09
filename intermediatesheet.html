@@ -1,221 +1,548 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Field-Level File Verification</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f4f6fa;
-      margin: 0;
-      padding: 16px;
-      color: #333;
-    }
-
-    h2 {
-      text-align: center;
-      color: #1a73e8;
-      margin-bottom: 20px;
-      font-size: 18px;
-    }
-
-    .file-card {
-      background-color: #fff;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-      padding: 14px;
-      margin-bottom: 15px;
-    }
-
-    .field-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-      flex-wrap: wrap;
-    }
-
-    .field-label {
-      flex: 1 1 60%;
-      font-size: 13px;
-      font-weight: 500;
-    }
-
-    .field-label span {
-      font-weight: bold;
-      color: #555;
-    }
-
-    .verify-btn {
-      flex: 1 1 35%;
-      padding: 6px 10px;
-      background-color: #1a73e8;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      margin-left: 8px;
-    }
-
-    .verify-btn:hover {
-      background-color: #155ab6;
-    }
-
-    a {
-      color: #1a73e8;
-      text-decoration: none;
-      word-break: break-word;
-    }
-
-    a:hover {
-      text-decoration: underline;
-    }
-  </style>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analogy Sheet Data</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .header h2 {
+            margin: 0;
+            font-size: 18px;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .btn {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+            margin: 5px;
+        }
+        
+        .btn:hover {
+            background: #3367d6;
+        }
+        
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .btn.save-btn {
+            background: #34a853;
+        }
+        
+        .btn.save-btn:hover {
+            background: #2d8f47;
+        }
+        
+        .btn.edit-btn {
+            background: #ea4335;
+        }
+        
+        .btn.edit-btn:hover {
+            background: #d33b2c;
+        }
+        
+        .btn.small {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #c33;
+        }
+        
+        .success {
+            background: #efe;
+            color: #3c763d;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3c763d;
+        }
+        
+        .data-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .data-header {
+            background: #f1f3f4;
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: background 0.3s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .data-header:hover {
+            background: #e8eaed;
+        }
+        
+        .data-header h3 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+        
+        .data-count {
+            background: #4285f4;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .data-content {
+            padding: 15px;
+            display: none;
+        }
+        
+        .data-content.active {
+            display: block;
+        }
+        
+        .data-item {
+            background: #f8f9fa;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            border-left: 3px solid #4285f4;
+            word-wrap: break-word;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .data-item.editing {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+        
+        .data-item-content {
+            flex: 1;
+            margin-right: 10px;
+        }
+        
+        .data-item-input {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        
+        .data-item-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .add-item-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .add-item-form {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .add-item-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        
+        .edit-mode-indicator {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #ffeaa7;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
+        
+        .sheet-info {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            color: #0277bd;
+        }
+        
+        .expand-icon {
+            transition: transform 0.3s;
+        }
+        
+        .expand-icon.rotated {
+            transform: rotate(180deg);
+        }
+    </style>
 </head>
 <body>
-  <h2>📁 File Field Verifier</h2>
-
-  <!-- Add this inside <body> before the file-card div -->
-  <select id="sheetDropdown" onchange="onSheetSelect()">
-    <option value="">Select a sheet</option>
-  </select>
-  <select id="fileDropdown" onchange="onFileSelect()">
-    <option value="">Select a file</option>
-  </select>
-  <div id="fileDetails"></div>
-
-  <!-- Example File Entry -->
-  <div class="file-card" data-fileid="xyz123">
-    <div class="field-row">
-      <div class="field-label"><span>File Name:</span> Invoice_July.pdf</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'fileName')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>Drive URL:</span> <a href="https://drive.google.com/file/d/xyz123" target="_blank">Open File</a></div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'url')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>Date:</span> 2025-07-04</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'date')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>Size:</span> 300 KB</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'size')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>MIME Type:</span> application/pdf</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'mime')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>Gmail ID:</span> user@gmail.com</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'gmail')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>Status:</span> Pending</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'status')">Verify</button>
-    </div>
-    <div class="field-row">
-      <div class="field-label"><span>UI:</span> Finance</div>
-      <button class="verify-btn" onclick="verifyField('xyz123', 'ui')">Verify</button>
-    </div>
-  </div>
-
-  <script>
-    // Load sheet names into dropdown on page load
-    window.onload = function() {
-      google.script.run.withSuccessHandler(function(sheets) {
-        const sheetDropdown = document.getElementById('sheetDropdown');
-        sheetDropdown.innerHTML = '<option value="">Select a sheet</option>';
-        sheets.forEach(sheet => {
-          // Optionally filter for only main sheets (analogy/humane)
-          if (sheet === 'analogy' || sheet === 'humane') {
-            const option = document.createElement('option');
-            option.value = sheet;
-            option.text = sheet.charAt(0).toUpperCase() + sheet.slice(1);
-            sheetDropdown.appendChild(option);
-          }
-        });
-      }).getSubsheetNamesGAS();
-    };
-
-    function onSheetSelect() {
-      const selectedSheet = document.getElementById('sheetDropdown').value;
-      if (!selectedSheet) {
-        document.getElementById('fileDropdown').innerHTML = '<option value="">Select a file</option>';
-        document.getElementById('fileDetails').innerHTML = '';
-        return;
-      }
-      loadFilesDropdown(selectedSheet);
-    }
-
-    function loadFilesDropdown(sheetName) {
-      google.script.run.withSuccessHandler(function(files) {
-        const dropdown = document.getElementById('fileDropdown');
-        dropdown.innerHTML = '<option value="">Select a file</option>';
-        if (!files || files.length === 0) {
-          const option = document.createElement('option');
-          option.value = '';
-          option.text = 'No files found';
-          dropdown.appendChild(option);
-          return;
-        }
-        files.forEach(file => {
-          const option = document.createElement('option');
-          option.value = file.fileId;
-          option.text = file.fileName;
-          dropdown.appendChild(option);
-        });
-      }).getMainSheetFiles(sheetName);
-      // Save current sheet for later use
-      window.currentSheet = sheetName;
-    }
-
-    function onFileSelect() {
-      const fileId = document.getElementById('fileDropdown').value;
-      if (!fileId) {
-        document.getElementById('fileDetails').innerHTML = '';
-        return;
-      }
-      google.script.run.withSuccessHandler(function(file) {
-        if (!file) {
-          document.getElementById('fileDetails').innerHTML = '<div>No details found.</div>';
-          return;
-        }
-        let html = `<div class="file-card" data-fileid="${file.fileId}">`;
-        html += buildFieldRow('File Name', file.fileName, file.fileId, 'File Name');
-        html += buildFieldRow('Drive URL', `<a href="${file.url}" target="_blank">Open File</a>`, file.fileId, 'File URL');
-        html += buildFieldRow('Date Created', file.date, file.fileId, 'Date Created');
-        html += buildFieldRow('Size', file.size, file.fileId, 'Size');
-        html += buildFieldRow('MIME Type', file.mimeType, file.fileId, 'Mime Type');
-        html += buildFieldRow('Gmail ID', file.gmailId, file.fileId, 'Gmail Message ID');
-        html += buildFieldRow('Status', file.status, file.fileId, 'invoice status');
-        html += buildFieldRow('UI', file.ui, file.fileId, 'UI');
-        html += `</div>`;
-        document.getElementById('fileDetails').innerHTML = html;
-      }).getFileDetailsById(window.currentSheet, fileId);
-    }
-
-    function buildFieldRow(label, value, fileId, field) {
-      return `
-        <div class="field-row">
-          <div class="field-label"><span>${label}:</span> ${value}</div>
-          <button class="verify-btn" onclick="verifyField('${fileId}', '${field}', this)">Verify</button>
+    <div class="container">
+        <div class="header">
+            <h2>📊 Analogy Sheet Data</h2>
         </div>
-      `;
-    }
+        
+        <div class="controls">
+            <button class="btn" id="refreshBtn" onclick="loadData()">
+                🔄 Refresh Data
+            </button>
+            <button class="btn edit-btn" id="editBtn" onclick="toggleEditMode()">
+                ✏️ Edit Mode
+            </button>
+            <button class="btn save-btn" id="saveBtn" onclick="saveAllChanges()" style="display: none;">
+                💾 Save All Changes
+            </button>
+        </div>
+        
+        <div id="editModeIndicator" class="edit-mode-indicator" style="display: none;">
+            📝 Edit Mode Active - Make your changes and click "Save All Changes"
+        </div>
+        
+        <div id="sheetInfo" class="sheet-info" style="display: none;"></div>
+        
+        <div id="loading" class="loading" style="display: none;">
+            ⏳ Loading data...
+        </div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="success" class="success" style="display: none;"></div>
+        
+        <div id="dataContainer" class="data-container" style="display: none;">
+            <!-- Data will be populated here -->
+        </div>
+    </div>
 
-    function verifyField(fileId, field, btn) {
-      google.script.run.withSuccessHandler(function(isVerified) {
-        if (isVerified) {
-          btn.style.backgroundColor = 'green';
-        } else {
-          btn.style.backgroundColor = '';
-          alert('Verification failed!');
+    <script>
+        let editMode = false;
+        let currentData = {};
+        let originalData = {};
+
+        // Load data when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadData();
+        });
+
+        function loadData() {
+            showLoading(true);
+            hideMessages();
+            
+            document.getElementById('refreshBtn').disabled = true;
+            
+            google.script.run
+                .withSuccessHandler(handleDataSuccess)
+                .withFailureHandler(handleDataError)
+                .getAnalogySheetData();
         }
-      }).verifyFieldData(window.currentSheet, fileId, field);
-    }
-  </script>
+
+        function handleDataSuccess(result) {
+            showLoading(false);
+            document.getElementById('refreshBtn').disabled = false;
+            
+            if (result.success) {
+                currentData = JSON.parse(JSON.stringify(result.data));
+                originalData = JSON.parse(JSON.stringify(result.data));
+                displayData(currentData);
+                showSheetInfo(result);
+                showSuccess(`Data loaded successfully! Found ${Object.keys(result.data).length} columns.`);
+            } else {
+                showError(result.error || 'Unknown error occurred');
+            }
+        }
+
+        function handleDataError(error) {
+            showLoading(false);
+            document.getElementById('refreshBtn').disabled = false;
+            showError('Failed to load data: ' + error.message);
+        }
+
+        function toggleEditMode() {
+            editMode = !editMode;
+            const editBtn = document.getElementById('editBtn');
+            const saveBtn = document.getElementById('saveBtn');
+            const indicator = document.getElementById('editModeIndicator');
+            
+            if (editMode) {
+                editBtn.textContent = '👁️ View Mode';
+                editBtn.className = 'btn';
+                saveBtn.style.display = 'inline-block';
+                indicator.style.display = 'block';
+            } else {
+                editBtn.textContent = '✏️ Edit Mode';
+                editBtn.className = 'btn edit-btn';
+                saveBtn.style.display = 'none';
+                indicator.style.display = 'none';
+            }
+            
+            displayData(currentData);
+        }
+
+        function displayData(data) {
+            const container = document.getElementById('dataContainer');
+            container.innerHTML = '';
+            
+            if (Object.keys(data).length === 0) {
+                container.innerHTML = '<div class="no-data">No data found in the analogy sheet.</div>';
+                container.style.display = 'block';
+                return;
+            }
+            
+            for (const [header, values] of Object.entries(data)) {
+                const section = document.createElement('div');
+                section.className = 'data-section';
+                
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'data-header';
+                headerDiv.onclick = () => toggleSection(headerDiv);
+                
+                headerDiv.innerHTML = `
+                    <h3>${escapeHtml(header)}</h3>
+                    <div>
+                        <span class="data-count">${values.length}</span>
+                        <span class="expand-icon">▼</span>
+                    </div>
+                `;
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'data-content';
+                
+                if (values.length === 0 && !editMode) {
+                    contentDiv.innerHTML = '<div class="no-data">No data under this header</div>';
+                } else {
+                    values.forEach((value, index) => {
+                        const item = document.createElement('div');
+                        item.className = 'data-item';
+                        
+                        if (editMode) {
+                            item.innerHTML = `
+                                <div class="data-item-content">
+                                    <input type="text" class="data-item-input" value="${escapeHtml(value)}" 
+                                           onchange="updateItemValue('${header}', ${index}, this.value)">
+                                </div>
+                                <div class="data-item-actions">
+                                    <button class="btn small" onclick="removeItem('${header}', ${index})" title="Remove item">
+                                        🗑️
+                                    </button>
+                                </div>
+                            `;
+                        } else {
+                            item.innerHTML = `<div class="data-item-content">${escapeHtml(value)}</div>`;
+                        }
+                        
+                        contentDiv.appendChild(item);
+                    });
+                    
+                    // Add "Add new item" section in edit mode
+                    if (editMode) {
+                        const addSection = document.createElement('div');
+                        addSection.className = 'add-item-section';
+                        addSection.innerHTML = `
+                            <div class="add-item-form">
+                                <input type="text" class="add-item-input" placeholder="Add new item..." 
+                                       id="addInput_${header}" onkeypress="handleAddKeyPress(event, '${header}')">
+                                <button class="btn small" onclick="addNewItem('${header}')">➕ Add</button>
+                            </div>
+                        `;
+                        contentDiv.appendChild(addSection);
+                    }
+                }
+                
+                section.appendChild(headerDiv);
+                section.appendChild(contentDiv);
+                container.appendChild(section);
+            }
+            
+            container.style.display = 'block';
+        }
+
+        function updateItemValue(header, index, newValue) {
+            if (currentData[header] && currentData[header][index] !== undefined) {
+                currentData[header][index] = newValue;
+            }
+        }
+
+        function removeItem(header, index) {
+            if (currentData[header] && currentData[header][index] !== undefined) {
+                currentData[header].splice(index, 1);
+                displayData(currentData);
+            }
+        }
+
+        function addNewItem(header) {
+            const input = document.getElementById(`addInput_${header}`);
+            const value = input.value.trim();
+            
+            if (value) {
+                if (!currentData[header]) {
+                    currentData[header] = [];
+                }
+                currentData[header].push(value);
+                input.value = '';
+                displayData(currentData);
+            }
+        }
+
+        function handleAddKeyPress(event, header) {
+            if (event.key === 'Enter') {
+                addNewItem(header);
+            }
+        }
+
+        function saveAllChanges() {
+            if (!editMode) return;
+            
+            showLoading(true);
+            document.getElementById('saveBtn').disabled = true;
+            
+            google.script.run
+                .withSuccessHandler(handleSaveSuccess)
+                .withFailureHandler(handleSaveError)
+                .updateAnalogySheetData(currentData);
+        }
+
+        function handleSaveSuccess(result) {
+            showLoading(false);
+            document.getElementById('saveBtn').disabled = false;
+            
+            if (result.success) {
+                originalData = JSON.parse(JSON.stringify(currentData));
+                showSuccess(`Changes saved successfully! Updated ${result.rowsUpdated} rows.`);
+                
+                // Refresh the data to ensure consistency
+                setTimeout(() => {
+                    loadData();
+                }, 1000);
+            } else {
+                showError(result.error || 'Failed to save changes');
+            }
+        }
+
+        function handleSaveError(error) {
+            showLoading(false);
+            document.getElementById('saveBtn').disabled = false;
+            showError('Failed to save changes: ' + error.message);
+        }
+
+        function toggleSection(headerElement) {
+            const contentElement = headerElement.nextElementSibling;
+            const icon = headerElement.querySelector('.expand-icon');
+            
+            if (contentElement.classList.contains('active')) {
+                contentElement.classList.remove('active');
+                icon.classList.remove('rotated');
+            } else {
+                contentElement.classList.add('active');
+                icon.classList.add('rotated');
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            
+            // Auto-hide success message after 3 seconds
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        function showSheetInfo(result) {
+            const infoDiv = document.getElementById('sheetInfo');
+            infoDiv.innerHTML = `
+                <strong>Sheet:</strong> ${result.sheetName} | 
+                <strong>Rows:</strong> ${result.totalRows} | 
+                <strong>Columns:</strong> ${result.totalColumns}
+            `;
+            infoDiv.style.display = 'block';
+        }
+
+        function hideMessages() {
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('success').style.display = 'none';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
 </body>
 </html>
