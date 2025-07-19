@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #333;
+        padding: 20px;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .popup-container {
+        background: white;
+        border-radius: 20px;
+        padding: 30px;
+        max-width: 500px;
+        width: 100%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        position: relative;
+      }
+
+      .popup-header {
+        text-align: center;
+        margin-bottom: 25px;
+      }
+
+      .popup-header h2 {
+        font-size: 1.8rem;
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 10px;
+      }
+
+      .popup-header p {
+        color: #666;
+        font-size: 0.9rem;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #2d3748;
+        font-size: 0.95rem;
+      }
+
+      .form-group input {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        font-size: 1rem;
+        transition: border-color 0.3s ease;
+        font-family: inherit;
+      }
+
+      .form-group input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+
+      .form-group small {
+        color: #666;
+        font-size: 0.85rem;
+        margin-top: 5px;
+        display: block;
+      }
+
+      .info-box {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 12px;
+        margin-top: 8px;
+        border-left: 4px solid #667eea;
+      }
+
+      .info-box h4 {
+        color: #2d3748;
+        font-size: 0.9rem;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+
+      .info-item {
+        color: #495057;
+        font-size: 0.85rem;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .info-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .info-item code {
+        background: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-family: 'Monaco', 'Menlo', monospace;
+      }
+
+      .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 25px;
+      }
+
+      .btn {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 0.9rem;
+        font-family: inherit;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+      }
+
+      .btn-secondary {
+        background: #f8f9fa;
+        color: #666;
+        border: 1px solid #e2e8f0;
+      }
+
+      .btn-secondary:hover {
+        background: #e2e8f0;
+        color: #333;
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .spinner {
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #667eea;
+        border-radius: 50%;
+        width: 16px;
+        height: 16px;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      .success-message {
+        background: #d4edda;
+        color: #155724;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border: 1px solid #c3e6cb;
+      }
+
+      .error-message {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border: 1px solid #f5c6cb;
+      }
+
+      .required {
+        color: #e53e3e;
+      }
+
+      @media (max-width: 600px) {
+        .popup-container {
+          margin: 10px;
+          padding: 20px;
+        }
+        
+        .form-actions {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="popup-container">
+      <div class="popup-header">
+        <h2>➕ Add New Client</h2>
+        <p>Create a new client with automated folder and sheet setup</p>
+      </div>
+
+      <div id="messageContainer"></div>
+
+      <form id="addClientForm">
+        <div class="form-group">
+          <label for="clientName">Client Name <span class="required">*</span></label>
+          <input type="text" id="clientName" required placeholder="Enter client name" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="gmailLabel">Gmail Label <span class="required">*</span></label>
+          <input type="text" id="gmailLabel" required placeholder="e.g., client/accruals/bills&invoices" autocomplete="off">
+          <small>Make sure this Gmail label exists in your Gmail account</small>
+        </div>
+
+        <div class="form-group">
+          <label>🚀 What will be created automatically:</label>
+          <div class="info-box">
+            <div class="info-item">
+              <span>✅</span>
+              <span>Company folder in: <code>Parent Companies Folder</code></span>
+            </div>
+            <div class="info-item">
+              <span>✅</span>
+              <span>Processing sheets: <code>{client}-buffer, {client}-inflow, {client}-outflow</code></span>
+            </div>
+            <div class="info-item">
+              <span>✅</span>
+              <span>Integration with attachment downloader system</span>
+            </div>
+            <div class="info-item">
+              <span>✅</span>
+              <span>Master sheet entry for dashboard tracking</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closePopup()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitBtn">Add Client</button>
+        </div>
+      </form>
+    </div>
+
+    <script>
+      function showMessage(message, type = 'success') {
+        const container = document.getElementById('messageContainer');
+        container.innerHTML = `<div class="${type}-message">${message}</div>`;
+        
+        // Auto-hide success messages
+        if (type === 'success') {
+          setTimeout(() => {
+            container.innerHTML = '';
+          }, 3000);
+        }
+      }
+
+      function closePopup() {
+        google.script.host.close();
+      }
+
+      function setLoading(isLoading) {
+        const submitBtn = document.getElementById('submitBtn');
+        if (isLoading) {
+          submitBtn.innerHTML = '<div class="spinner"></div>Adding Client...';
+          submitBtn.disabled = true;
+        } else {
+          submitBtn.innerHTML = 'Add Client';
+          submitBtn.disabled = false;
+        }
+      }
+
+      // Form submission handler
+      document.getElementById('addClientForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = {
+          name: document.getElementById('clientName').value.trim(),
+          gmailLabel: document.getElementById('gmailLabel').value.trim()
+        };
+        
+        // Validate form
+        if (!formData.name || !formData.gmailLabel) {
+          showMessage('Please fill in all required fields', 'error');
+          return;
+        }
+        
+        // Validate Gmail label format
+        if (!formData.gmailLabel.includes('/')) {
+          showMessage('Gmail label should follow the format: client/category/subcategory', 'error');
+          return;
+        }
+        
+        // Show loading state
+        setLoading(true);
+        
+        // Try Google Apps Script first, fall back to dashboard integration
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run
+            .withSuccessHandler(function(result) {
+              setLoading(false);
+              
+              if (result.success) {
+                showMessage(result.message, 'success');
+                
+                // Show additional details about what was created
+                if (result.companyFolderId && result.sheetId) {
+                  setTimeout(() => {
+                    showMessage(`✅ Company folder created: ${result.companyFolderId}`, 'success');
+                  }, 1000);
+                  setTimeout(() => {
+                    showMessage(`✅ Processing sheets created in master sheet`, 'success');
+                  }, 2000);
+                }
+                
+                // Close popup after 3 seconds
+                setTimeout(() => {
+                  closePopup();
+                }, 3000);
+                
+              } else {
+                showMessage(result.message, 'error');
+              }
+            })
+            .withFailureHandler(function(error) {
+              setLoading(false);
+              showMessage('Error adding client: ' + error.message, 'error');
+            })
+            .addNewClient(formData);
+        } else {
+          // Demo mode - communicate with dashboard
+          try {
+            // Try to communicate with parent window (dashboard)
+            if (window.opener && window.opener.addClientToDashboard) {
+              window.opener.addClientToDashboard(formData);
+              setLoading(false);
+              showMessage('Client added successfully!', 'success');
+              
+              // Close popup after 2 seconds
+              setTimeout(() => {
+                closePopup();
+              }, 2000);
+            } else {
+              setLoading(false);
+              showMessage('Error: Cannot communicate with dashboard', 'error');
+            }
+          } catch (error) {
+            setLoading(false);
+            showMessage('Error adding client: ' + error.message, 'error');
+          }
+        }
+      });
+
+      // Focus on first input when popup opens
+      window.onload = function() {
+        document.getElementById('clientName').focus();
+      };
+    </script>
+  </body>
+</html> 

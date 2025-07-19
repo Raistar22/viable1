@@ -1,3 +1,7 @@
+//attachment_downloader.js code working with buffer1 buffer2 classification ,invoice generation date time, vendor date you have to combine the vendor name and date for renaming the file only at this point 
+
+//attachment_donwloader.js till 17-07-25
+
 //attachment_downloader.js code till 1:00 pm 03-07-2025
 
 
@@ -26,15 +30,31 @@ var isScriptEdit = false;
 // --- IMPORTANT: CONFIGURE YOUR DRIVE FOLDER IDs HERE ---
 // Aligned with Reroute.js - only main company folders needed
 // Using different variable name to avoid conflict with Reroute.js
+
+// Parent folder where all company folders are stored
+var PARENT_COMPANIES_FOLDER_ID = "1Tqj8May8je0L1lET5PIHRJj4P8d9T3MT";
+
+// Company folder mappings - new companies will be auto-created in parent folder
 var ATTACHMENT_COMPANY_FOLDER_MAP = {
   "analogy": "160pN2zDCb9UQbwIXqgggdTjLUrFM2cM3", // Main Analogy Folder
   "humane": "1E6ijhWhdYykymN0MEUINd9jETmdM2sAt"   // Main Humane Folder
+  // New companies will be automatically added here when first accessed
 };
+
+// Initialize company folder mappings on script load
+(function initializeCompanyMappings() {
+  try {
+    loadCompanyFolderMappings();
+    Logger.log('Company folder mappings initialized successfully.');
+  } catch (error) {
+    Logger.log(`Warning: Could not initialize company folder mappings: ${error.toString()}`);
+  }
+})();
 
 // --------------------------------------------------------
 
 // --- Sheet Header Definitions ---
-const BUFFER_SHEET_HEADERS = ['Date', 'OriginalFileName', 'ChangedFilename', 'Invoice ID', 'Drive File ID', 'Gmail Message ID', 'Reason', 'Status', 'UI', 'Repeated', 'Invoice Count', 'Attachment ID', 'Email ID'];
+const BUFFER_SHEET_HEADERS = ['Date', 'OriginalFileName', 'ChangedFilename', 'Invoice ID', 'Drive File ID', 'Gmail Message ID', 'Reason', 'Status', 'UI', 'Repeated', 'Invoice Count', 'Attachment ID', 'Email ID', 'Vendor Name'];
 const BUFFER2_SHEET_HEADERS = [
   'Date',
   'OriginalFileName',
@@ -43,13 +63,14 @@ const BUFFER2_SHEET_HEADERS = [
   'Drive File ID',
   'Gmail Message ID',
   'Relevance',
-  'UI'
+  'UI',
+  'Vendor Name'
 ];
 const MAIN_SHEET_HEADERS = [
   'File Name', 'File ID', 'File URL',
   'Date Created (Drive)', 'Last Updated (Drive)', 'Size (bytes)', 'Mime Type',
   'Email Subject', 'Gmail Message ID', 'invoice status', 'UI',
-  'Date', 'Month', 'FY', 'GST', 'TDS', 'OT', 'NA'
+  'Date', 'Month', 'FY', 'GST', 'TDS', 'OT', 'NA', 'Vendor Name'
 ];
 
 // Global counter for unique identifiers
@@ -62,6 +83,7 @@ var FILE_IDENTIFIER_MAP = {};
 var PROCESSED_EMAILS_LOG = {}; // Track emails by message ID
 var ATTACHMENT_PROCESSING_LOG = {}; // Track attachments by message ID + attachment name
 var ERROR_RECOVERY_LOG = {}; // Track failed operations for retry
+var THREAD_CONTEXT_LOG = {}; // Track thread-level information for sender recognition (supplementary)
 
 
 /**
@@ -107,9 +129,9 @@ function getUIFromBufferSheet(companyName, changedFilename, driveFileId) {
   // Look for the file by filename or file ID
   for (let i = 1; i < bufferData.length; i++) {
     const row = bufferData[i];
-    const bufferChangedFilename = row[1]; // ChangedFilename column
-    const bufferDriveFileId = row[3]; // Drive File ID column
-    const bufferUI = row[7]; // UI column (Unique Identifier)
+    const bufferChangedFilename = row[2]; // ChangedFilename column (index 2) - THE SOURCE OF TRUTH
+    const bufferDriveFileId = row[4]; // Drive File ID column (index 4)
+    const bufferUI = row[8]; // UI column (index 8)
     
     // Match by either filename or file ID
     if ((changedFilename && bufferChangedFilename === changedFilename) || 
@@ -121,6 +143,76 @@ function getUIFromBufferSheet(companyName, changedFilename, driveFileId) {
   
   Logger.log(`No UI found in buffer sheet for file: ${changedFilename || driveFileId}`);
   return '';
+}
+
+/**
+ * Automatically creates a company folder structure in the parent companies folder
+ * @param {string} companyName - The name of the company
+ * @returns {string} The ID of the created company folder
+ */
+function createCompanyFolderStructure(companyName) {
+  try {
+    Logger.log(`Creating folder structure for new company: ${companyName}`);
+    
+    // Get the parent companies folder
+    const parentFolder = DriveApp.getFolderById(PARENT_COMPANIES_FOLDER_ID);
+    Logger.log(`Parent folder found: ${parentFolder.getName()}`);
+    
+    // Check if company folder already exists
+    const existingFolders = parentFolder.getFoldersByName(companyName);
+    let companyFolder;
+    
+    if (existingFolders.hasNext()) {
+      // Company folder already exists
+      companyFolder = existingFolders.next();
+      Logger.log(`Company folder already exists: ${companyFolder.getName()} (ID: ${companyFolder.getId()})`);
+    } else {
+      // Create new company folder
+      companyFolder = parentFolder.createFolder(companyName);
+      Logger.log(`Created new company folder: ${companyFolder.getName()} (ID: ${companyFolder.getId()})`);
+    }
+    
+    // Update the company folder mapping
+    ATTACHMENT_COMPANY_FOLDER_MAP[companyName] = companyFolder.getId();
+    
+    // Store the mapping in script properties for persistence
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty(`COMPANY_FOLDER_${companyName.toUpperCase()}`, companyFolder.getId());
+    
+    Logger.log(`Company folder mapping updated for ${companyName}: ${companyFolder.getId()}`);
+    
+    return companyFolder.getId();
+    
+  } catch (error) {
+    Logger.log(`Error creating company folder structure for ${companyName}: ${error.toString()}`);
+    throw new Error(`Failed to create company folder structure: ${error.message}`);
+  }
+}
+
+/**
+ * Loads company folder mappings from script properties (for persistence across runs)
+ */
+function loadCompanyFolderMappings() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const allProperties = props.getProperties();
+    
+    // Load any stored company folder mappings
+    Object.keys(allProperties).forEach(key => {
+      if (key.startsWith('COMPANY_FOLDER_')) {
+        const companyName = key.replace('COMPANY_FOLDER_', '').toLowerCase();
+        const folderId = allProperties[key];
+        
+        // Only add if not already in the mapping
+        if (!ATTACHMENT_COMPANY_FOLDER_MAP[companyName]) {
+          ATTACHMENT_COMPANY_FOLDER_MAP[companyName] = folderId;
+          Logger.log(`Loaded company mapping from storage: ${companyName} -> ${folderId}`);
+        }
+      }
+    });
+  } catch (error) {
+    Logger.log(`Error loading company folder mappings: ${error.toString()}`);
+  }
 }
 
 /**
@@ -196,7 +288,7 @@ function createBufferFolderStructure(companyName, financialYear) {
 }
 
 /**
- * Create folder structure: Company/FY-XX-XX/Accruals/Buffer2 (for non-invoice files)
+ * Create folder structure: Company/FY-XX-XX/Accruals/Buffer2 (for non-invoice files and unknown types)
  * @param {string} companyName - Company name (analogy/humane)
  * @param {string} financialYear - Financial year (FY-XX-XX)
  * @returns {GoogleAppsScript.Drive.DriveFolder} Buffer2 folder
@@ -336,7 +428,7 @@ function getAllProcessedGmailMessageIds(companyName) {
   if (bufferSheet && bufferSheet.getLastRow() > 1) {
     const bufferData = bufferSheet.getDataRange().getValues();
     for (let i = 1; i < bufferData.length; i++) {
-      const gmailId = bufferData[i][4]; // Gmail Message ID column
+      const gmailId = bufferData[i][5]; // Gmail Message ID column (index 5)
       if (gmailId) processedIds.add(gmailId);
     }
   }
@@ -537,42 +629,150 @@ function extractInvoiceIdFromFilename(filename) {
  * @param {string} originalFileName The original filename including extension.
  * @returns {string} The new, sanitized filename.
  */
+/**
+ * Generates a new filename with robust defaults to avoid errors.
+ * @param {Object} extractedData Extracted data.
+ * @param {string} originalFileName Original filename.
+ * @returns {string} New filename.
+ */
 function generateNewFilename(extractedData, originalFileName) {
-  const lastDotIndex = originalFileName.lastIndexOf('.');
-  const extension = lastDotIndex > 0 ? originalFileName.substring(lastDotIndex) : '';
-  const date = String(extractedData.date || "YYYY-MM-DD");
-  const vendor = String(extractedData.vendorName || "UnknownVendor");
-  const invoice = String(extractedData.invoiceNumber || "INV-Unknown");
-  const amount = String(extractedData.amount || "0.00");
+  const extension = originalFileName.split('.').pop() || 'pdf';
+  
+  // Use extracted or safe defaults
+  const date = extractedData.date || getCurrentDateString();
+  const vendor = extractedData.vendorName || extractVendorFromFilename(originalFileName) || 'UnknownVendor';
+  const invoice = extractedData.invoiceNumber || extractInvoiceIdFromFilename(originalFileName) || generateInvoiceNumber();
+  const amount = extractedData.amount || '0.00';
 
-  const sanitizedDate = date.replace(/[^0-9\-]/g, '').trim() || "YYYY-MM-DD";
-  // Allow spaces in vendor name, replace underscores with hyphens
-  const sanitizedVendor = vendor.replace(/[_]/g, '-')
-    .replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim() || "UnknownVendor";
-  const sanitizedInvoice = invoice.replace(/[_]/g, '-')
-    .replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, '').trim() || "INV-Unknown";
-  const sanitizedAmount = amount.replace(/[_]/g, '')
-    .replace(/[/\\:*?"<>|]/g, '').trim() || "0.00";
+  // Sanitize (same as before, but ensure no empties)
+  const sanitizedDate = date.replace(/[^0-9-]/g, '') || getCurrentDateString();
+  const sanitizedVendor = vendor.replace(/[^a-zA-Z0-9\s-]/g, '').trim() || 'UnknownVendor';
+  const sanitizedInvoice = invoice.replace(/[^a-zA-Z0-9-]/g, '').toUpperCase() || 'INV-UNKNOWN';
+  const sanitizedAmount = amount.replace(/[^0-9.]/g, '') || '0.00';
 
-  return `${sanitizedDate}_${sanitizedVendor}_${sanitizedInvoice}_${sanitizedAmount}${extension}`;
+  const newFilename = `${sanitizedDate}_${sanitizedVendor}_${sanitizedInvoice}_${sanitizedAmount}.${extension}`;
+  Logger.log(`Generated robust filename: ${newFilename}`);
+  return newFilename;
 }
 
 /**
- * Retrieves all existing 'ChangedFilename' values from the buffer sheet.
+ * Enhanced fallback filename generation using meaningful words from original filename
+ * @param {string} originalFileName Original filename
+ * @returns {string} New filename using meaningful words
+ */
+function generateFallbackFilenameFromOriginal(originalFileName) {
+  Logger.log(`Generating fallback filename from original: ${originalFileName}`);
+  
+  const extension = originalFileName.split('.').pop() || 'pdf';
+  const baseName = originalFileName.replace(/\.[^/.]+$/, ''); // Remove extension
+  
+  // Extract meaningful words (exclude common meaningless words)
+  const meaninglessWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'file', 'document', 'doc', 'img', 'image', 'scan', 'copy', 'attachment', 'att', 'untitled', 'new', 'temp', 'tmp'];
+  
+  // Split by common separators and filter meaningful words
+  const words = baseName
+    .toLowerCase()
+    .split(/[\s\-_\.\(\)\[\]]+/)
+    .filter(word => word.length > 2 && !meaninglessWords.includes(word))
+    .filter(word => !/^[0-9]+$/.test(word) || word.length >= 4) // Keep numbers if they're 4+ digits (years, invoice numbers)
+    .slice(0, 4); // Take first 4 meaningful words
+  
+  // Extract potential date from filename
+  const dateMatch = baseName.match(/(\d{4}[-_]\d{2}[-_]\d{2}|\d{2}[-_]\d{2}[-_]\d{4}|\d{8})/);
+  const extractedDate = dateMatch ? standardizeDateFormat(dateMatch[1]) : getCurrentDateString();
+  
+  // Extract potential amount from filename
+  const amountMatch = baseName.match(/(\d+\.\d{2}|\d+[\-_]?\d{2})/);
+  const extractedAmount = amountMatch ? amountMatch[1].replace(/[\-_]/g, '.') : '0.00';
+  
+  // Build filename with meaningful components
+  let meaningfulParts = [];
+  
+  // Add date
+  meaningfulParts.push(extractedDate.replace(/[^0-9-]/g, ''));
+  
+  // Add meaningful words as vendor/description
+  if (words.length > 0) {
+    const vendorPart = words.join('_').replace(/[^a-zA-Z0-9_]/g, '').substring(0, 20);
+    meaningfulParts.push(vendorPart);
+  } else {
+    meaningfulParts.push('Document');
+  }
+  
+  // Add invoice number if found, otherwise generate one
+  const invoiceMatch = baseName.match(/\b(inv|invoice|bill|ref|no)[\-_]?([a-zA-Z0-9\-]+)\b/i);
+  if (invoiceMatch) {
+    meaningfulParts.push(invoiceMatch[2].toUpperCase());
+  } else {
+    meaningfulParts.push(generateInvoiceNumber());
+  }
+  
+  // Add amount
+  meaningfulParts.push(extractedAmount);
+  
+  const fallbackFilename = `${meaningfulParts.join('_')}.${extension}`;
+  Logger.log(`Generated fallback filename: ${fallbackFilename}`);
+  return fallbackFilename;
+}
+
+/**
+ * Retrieves all existing 'ChangedFilename' values from the buffer sheet with row tracking.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} bufferSheet The buffer sheet.
- * @returns {Set<string>} A Set of existing changed filenames.
+ * @returns {Object} Object with filename set and row mapping.
  */
 function getExistingChangedFilenames(bufferSheet) {
   const existingChangedFilenames = new Set();
+  const filenameToRowMap = new Map(); // Maps filename to row number
   const data = bufferSheet.getDataRange().getValues();
-  // ChangedFilename is in column 2 (index 1)
+  
+  // ChangedFilename is in column 3 (index 2) - THE SOURCE OF TRUTH
   for (let i = 1; i < data.length; i++) { // Start from 1 to skip header row
-    const changedFilename = data[i][1];
+    const changedFilename = data[i][2]; // Correct index for ChangedFilename
     if (changedFilename) {
       existingChangedFilenames.add(changedFilename);
+      if (!filenameToRowMap.has(changedFilename)) {
+        filenameToRowMap.set(changedFilename, i + 1); // Store 1-based row number
+      }
     }
   }
-  return existingChangedFilenames;
+  
+  return {
+    filenames: existingChangedFilenames,
+    rowMap: filenameToRowMap
+  };
+}
+
+/**
+ * Colors duplicate files and updates the Repeated column with reference row numbers
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} bufferSheet The buffer sheet
+ * @param {string} duplicateFilename The filename that's duplicated
+ * @param {number} newRowIndex The row index of the new duplicate entry
+ * @param {number} originalRowIndex The row index of the original file
+ */
+function handleDuplicateFileColoring(bufferSheet, duplicateFilename, newRowIndex, originalRowIndex) {
+  try {
+    // Color both the original and duplicate rows
+    const duplicateColor = '#FFE6E6'; // Light red for duplicates
+    const originalColor = '#E6F3FF'; // Light blue for original
+    
+    // Color the new duplicate row
+    bufferSheet.getRange(newRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground(duplicateColor);
+    
+    // Color the original row
+    bufferSheet.getRange(originalRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground(originalColor);
+    
+    // Update the Repeated column (index 9) for the duplicate row
+    const repeatedColumnIndex = BUFFER_SHEET_HEADERS.indexOf('Repeated') + 1; // Convert to 1-based
+    bufferSheet.getRange(newRowIndex, repeatedColumnIndex).setValue(`Row ${originalRowIndex}`);
+    
+    // Update the Repeated column for the original row to show it has duplicates
+    bufferSheet.getRange(originalRowIndex, repeatedColumnIndex).setValue(`Duplicated in Row ${newRowIndex}`);
+    
+    Logger.log(`Duplicate file handling: ${duplicateFilename} - Original: Row ${originalRowIndex}, Duplicate: Row ${newRowIndex}`);
+    
+  } catch (error) {
+    Logger.log(`Error handling duplicate file coloring: ${error.toString()}`);
+  }
 }
 
 /**
@@ -580,7 +780,7 @@ function getExistingChangedFilenames(bufferSheet) {
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet The buffer sheet to apply validation to.
  */
 function setStatusDropdownValidation(sheet) {
-  const range = sheet.getRange("G:G"); // Status column is G (index 6, 0-indexed)
+  const range = sheet.getRange("H:H"); // Status column is G (index 6, 0-indexed)
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(['Active', 'Delete'], true).build();
   range.setDataValidation(rule);
   Logger.log(`Status dropdown validation applied to ${sheet.getName()}`);
@@ -618,7 +818,7 @@ function findAttachmentInMessage(message, attachmentName) {
 }
 
 /**
- * Logs a file's details to a specified log sheet with UI.
+ * Logs a file's details to a specified log sheet with UI and vendor name.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} logSheet The sheet to log to.
  * @param {GoogleAppsScript.Drive.File} driveFile The Drive file object.
  * @param {string} emailSubject The subject of the original email.
@@ -626,6 +826,7 @@ function findAttachmentInMessage(message, attachmentName) {
  * @param {string} invoiceStatus The determined invoice status (inflow, outflow, unknown).
  * @param {string} companyName The company name to get UI from buffer sheet.
  * @param {string} providedUI Optional UI to use instead of looking up from buffer sheet.
+ * @param {Object} extraData Additional data including vendor name.
  */
 function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, invoiceStatus, companyName, providedUI = null, extraData = {}) {
   // Ensure headers are present in the first row
@@ -641,7 +842,7 @@ function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, i
   if (!ui) {
     ui = getUIFromBufferSheet(companyName, driveFile.getName(), driveFile.getId());
   }
-  // Extract extra fields
+  // Extract extra fields including vendor name
   const {
     date = '',
     month = '',
@@ -649,7 +850,8 @@ function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, i
     gst = '',
     tds = '',
     ot = '',
-    na = ''
+    na = '',
+    vendorName = 'Unknown'
   } = extraData;
   logSheet.appendRow([
     driveFile.getName(),
@@ -669,7 +871,8 @@ function logFileToMainSheet(logSheet, driveFile, emailSubject, gmailMessageId, i
     gst,
     tds,
     ot,
-    na
+    na,
+    vendorName
   ]);
   Logger.log(`Logged file ${driveFile.getName()} (ID: ${driveFile.getId()}) with UI '${ui}' to ${logSheet.getName()}`);
   sortSheetByDateDesc(logSheet, 4); // Sort by 'Date Created (Drive)' (column 4)
@@ -704,13 +907,30 @@ function processAttachments(labelName, processToken) {
 
   // Example: labelName = "analogy/accruals/bills&invoices"
   const companyName = labelName.split('/')[0]; // "analogy" or "humane"
-const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[companyName]);
   const bufferLabelName = `${companyName}-buffer`;
 
-  // Check if the company exists in our folder mapping
+  // Load existing company folder mappings from script properties
+  loadCompanyFolderMappings();
+
+  // Check if the company exists in our folder mapping, create if not
+  let isNewCompany = false;
   if (!ATTACHMENT_COMPANY_FOLDER_MAP[companyName]) {
-    return { status: 'error', message: `Error: No Drive folder configured for company '${companyName}'. Please update the script.` };
+    Logger.log(`Company '${companyName}' not found in folder mapping. Creating new folder structure...`);
+    
+    try {
+      const newCompanyFolderId = createCompanyFolderStructure(companyName);
+      Logger.log(`Successfully created company folder structure for '${companyName}' with ID: ${newCompanyFolderId}`);
+      isNewCompany = true;
+    } catch (createError) {
+      const availableCompanies = Object.keys(ATTACHMENT_COMPANY_FOLDER_MAP).join(', ');
+      return { 
+        status: 'error', 
+        message: `Error: Failed to create folder structure for company '${companyName}': ${createError.message}. Available companies: ${availableCompanies}. Please check the parent folder permissions.` 
+      };
+    }
   }
+
+  const companyFolder = DriveApp.getFolderById(ATTACHMENT_COMPANY_FOLDER_MAP[companyName]);
 
   let bufferSheet;
   try {
@@ -801,7 +1021,9 @@ try {
 
     // Enhanced tracking with comprehensive duplicate prevention
     const processedGmailMessageIds = getAllProcessedGmailMessageIds(companyName);
-    const existingChangedFilenamesInCurrentBuffer = getExistingChangedFilenames(bufferSheet);
+    const existingFilenamesData = getExistingChangedFilenames(bufferSheet);
+    const existingChangedFilenamesInCurrentBuffer = existingFilenamesData.filenames;
+    const filenameToRowMap = existingFilenamesData.rowMap;
     let totalNewAttachments = 0;
     let processedAttachments = 0;
     let skippedAttachments = 0;
@@ -812,6 +1034,7 @@ try {
     PROCESSED_EMAILS_LOG = {};
     ATTACHMENT_PROCESSING_LOG = {};
     ERROR_RECOVERY_LOG = {};
+    THREAD_CONTEXT_LOG = {}; // Clear supplementary thread context
 
     // First pass: Enhanced email and attachment analysis with comprehensive tracking
     const threads = gmailLabel.getThreads();
@@ -822,7 +1045,12 @@ try {
         return { status: 'cancelled', message: "Process cancelled during attachment counting." };
       }
       
-      const messages = threads[t].getMessages();
+      // Extract thread context for analysis (supplementary, doesn't affect main logic)
+      const currentThread = threads[t];
+      const threadContext = getThreadContext(currentThread);
+      logThreadContext(threadContext.threadId, threadContext, 'analyzing');
+      
+      const messages = currentThread.getMessages();
       for (let m = 0; m < messages.length; m++) {
         const message = messages[m];
         const messageId = message.getId();
@@ -892,7 +1120,11 @@ try {
         return { status: 'cancelled', message: `Process cancelled. Processed ${processedAttachments} of ${totalNewAttachments} attachments before cancellation.` };
       }
 
-      const messages = threads[t].getMessages();
+      // Get thread context for this processing iteration (supplementary)
+      const currentThread = threads[t];
+      const threadContext = getThreadContext(currentThread);
+      
+      const messages = currentThread.getMessages();
       for (let m = 0; m < messages.length; m++) {
         const message = messages[m];
         const messageId = message.getId();
@@ -920,6 +1152,8 @@ try {
               if (existingAttachmentStatus && existingAttachmentStatus.status === 'processed') {
                 Logger.log(`Skipping attachment ${originalFilename} from message ${messageId}: already processed`);
                 trackAttachmentProcessing(messageId, originalFilename, 'skipped', 'Already processed in previous run');
+                // Update thread stats (supplementary)
+                updateThreadStats(threadContext.threadId, 'skipped');
                 skippedAttachments++;
                 attachmentsProcessedForThisMessage++;
                 continue;
@@ -929,152 +1163,21 @@ try {
               const blob = attachment.copyBlob();
               const aiExtractedData = callGeminiAPIInternal(blob, originalFilename);
               
-              Logger.log(`AI extracted data for ${originalFilename}: ${JSON.stringify(aiExtractedData)}`);
+              Logger.log(`=== AI PROCESSING FOR ${originalFilename} ===`);
+              Logger.log(`AI extracted data: ${JSON.stringify(aiExtractedData)}`);
+              Logger.log(`AI extracted invoice status: ${aiExtractedData.invoiceStatus}`);
               
-              // Handle multi-invoice files
-              if (aiExtractedData.isMultiInvoice && aiExtractedData.invoiceCount > 1) {
-                Logger.log(`Multi-invoice file detected: ${originalFilename} contains ${aiExtractedData.invoiceCount} invoices`);
-                
-                // Process each invoice separately
-                for (let invoiceIndex = 0; invoiceIndex < aiExtractedData.invoices.length; invoiceIndex++) {
-                  const invoiceData = aiExtractedData.invoices[invoiceIndex];
-                  
-                  // Generate unique filename for each invoice
-                  const multiInvoiceFilename = generateMultiInvoiceFilename(invoiceData, originalFilename, invoiceIndex + 1, aiExtractedData.invoiceCount);
-                  
-                  Logger.log(`Processing invoice ${invoiceIndex + 1}/${aiExtractedData.invoiceCount}: ${multiInvoiceFilename}`);
-                  
-                  // Check for duplicates
-                  const isDuplicateMultiFilename = existingChangedFilenamesInCurrentBuffer.has(multiInvoiceFilename);
-                  let multiInvoiceFile = null;
-                  let multiUniqueIdentifier = '';
-                  
-                  if (!isDuplicateMultiFilename) {
-                    try {
-                      // Create separate file for each invoice
-                      const now = new Date();
-                      const financialYear = calculateFinancialYear(now);
-                      const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
-                      
-                      const multiInvoiceBlob = attachment.copyBlob().setName(multiInvoiceFilename);
-                      multiInvoiceFile = bufferActiveFolder.createFile(multiInvoiceBlob);
-                      
-                      multiUniqueIdentifier = generateUniqueIdentifierForFile(multiInvoiceFile.getId());
-                      
-                      processedAttachments++;
-                      attachmentsProcessedForThisMessage++;
-                      existingChangedFilenamesInCurrentBuffer.add(multiInvoiceFilename);
-                      
-                      // Track successful processing
-                      trackAttachmentProcessing(messageId, `${originalFilename}_invoice_${invoiceIndex + 1}`, 'processed', `Multi-invoice file: ${invoiceIndex + 1}/${aiExtractedData.invoiceCount}`);
-                      
-                      // Log to main sheet
-                      const emailSubject = message.getSubject ? message.getSubject() : '';
-                      const invoiceStatus = invoiceData.invoiceStatus || "unknown";
-                      
-                      let mainSheet = ss.getSheetByName(companyName);
-                      if (!mainSheet) {
-                        mainSheet = ss.insertSheet(companyName);
-                        mainSheet.appendRow(MAIN_SHEET_HEADERS);
-                      }
-                      logFileToMainSheet(mainSheet, multiInvoiceFile, emailSubject, messageId, invoiceStatus, companyName, multiUniqueIdentifier, {
-                        date: now.toISOString().split('T')[0],
-                        month: getMonthFromDate(now),
-                        fy: calculateFinancialYear(now),
-                        gst: aiExtractedData.gst || '',
-                        tds: aiExtractedData.tds || '',
-                        ot: aiExtractedData.ot || '',
-                        na: aiExtractedData.na || ''
-                      });
-                      
-                      // Handle inflow/outflow for each invoice
-                      if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
-                        const month = getMonthFromDate(now);
-                        const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
-                        
-                        let flowFile = null;
-                        try {
-                          flowFile = multiInvoiceFile.makeCopy(multiInvoiceFilename, flowFolder);
-                          Logger.log(`Copied multi-invoice file ${multiInvoiceFilename} to ${invoiceStatus} folder.`);
-                        } catch (copyErr) {
-                          Logger.log(`Error copying multi-invoice file ${multiInvoiceFilename} to ${invoiceStatus} folder: ${copyErr}`);
-                        }
-                        
-                        // Log to inflow/outflow sheet
-                        const flowSheetName = `${companyName}-${invoiceStatus}`;
-                        let flowSheet = ss.getSheetByName(flowSheetName);
-                        if (!flowSheet) {
-                          flowSheet = ss.insertSheet(flowSheetName);
-                          flowSheet.appendRow(MAIN_SHEET_HEADERS);
-                          flowSheet.getRange(1, 1, 1, MAIN_SHEET_HEADERS.length).setFontWeight('bold').setBackground('#E8F0FE').setBorder(true, true, true, true, true, true);
-                          flowSheet.setFrozenRows(1);
-                        }
-                        if (flowFile) {
-                          logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus, companyName, multiUniqueIdentifier, {
-                            date: now.toISOString().split('T')[0],
-                            month: getMonthFromDate(now),
-                            fy: calculateFinancialYear(now),
-                            gst: aiExtractedData.gst || '',
-                            tds: aiExtractedData.tds || '',
-                            ot: aiExtractedData.ot || '',
-                            na: aiExtractedData.na || ''
-                          });
-                        }
-                      }
-                      
-                    } catch (multiFileError) {
-                      Logger.log(`Error creating multi-invoice file ${invoiceIndex + 1}: ${multiFileError.toString()}`);
-                      logProcessingError(messageId, `${originalFilename}_invoice_${invoiceIndex + 1}`, multiFileError.toString(), 'multi_invoice_creation');
-                      trackAttachmentProcessing(messageId, `${originalFilename}_invoice_${invoiceIndex + 1}`, 'failed', `Multi-invoice creation failed: ${multiFileError.message}`);
-                      continue;
-                    }
-                  } else {
-                    // Duplicate multi-invoice file
-                    multiUniqueIdentifier = generateUniqueIdentifierForFile(`multi_duplicate_${messageId}_${invoiceIndex}`);
-                    Logger.log(`Skipping duplicate multi-invoice file: ${multiInvoiceFilename}`);
-                    trackAttachmentProcessing(messageId, `${originalFilename}_invoice_${invoiceIndex + 1}`, 'skipped', `Duplicate multi-invoice filename`);
-                    skippedAttachments++;
-                    attachmentsProcessedForThisMessage++;
-                  }
-                  
-                  // Log to buffer sheet for each invoice
-                  const multiInvoiceRowData = [
-                    `${originalFilename} (Invoice ${invoiceIndex + 1}/${aiExtractedData.invoiceCount})`, // Enhanced original filename
-                    multiInvoiceFilename,
-                    invoiceData.invoiceNumber || 'INV-Unknown',
-                    multiInvoiceFile ? multiInvoiceFile.getId() : '',
-                    messageId,
-                    `Multi-invoice: ${invoiceIndex + 1}/${aiExtractedData.invoiceCount} | ${invoiceData.documentType || 'document'} | Amount: ${invoiceData.amount || '0.00'}`,
-                    'Active',
-                    multiUniqueIdentifier,
-                    '',
-                    aiExtractedData.invoiceCount || 1,
-                    attachment.getId ? attachment.getId() : '',
-                    messageId
-                  ];
-                  bufferSheet.appendRow(multiInvoiceRowData);
-                  sortSheetByDateDesc(bufferSheet, 1);
-                  const newMultiRowIndex = bufferSheet.getLastRow();
-                  if (isDuplicateMultiFilename) {
-                    bufferSheet.getRange(newMultiRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFFF00'); // Yellow for duplicate
-                  }
-                  
-                  Utilities.sleep(50); // Small delay between invoice processing
-                }
-                
-                // Skip the regular single-file processing since we handled it as multi-invoice
-                continue;
-              }
-              
-              // Regular single-invoice processing
+              // Generate new filename using AI-extracted data
               const changedFilename = generateNewFilename(aiExtractedData, originalFilename);
-              Logger.log(`Generated filename: ${changedFilename}`);
+              Logger.log(`Generated new filename: "${originalFilename}" → "${changedFilename}"`);
               
               // Store AI-extracted data for later use
-              const extractedInvoiceStatus = aiExtractedData.invoiceStatus || 'unknown';
+              const extractedInvoiceStatus = aiExtractedData.invoiceStatus || 'outflow';
 
-              // Check if this is a non-invoice/bill file (unknown status)
-              if (extractedInvoiceStatus === 'unknown') {
+              // Check if this is explicitly marked as a non-invoice/bill file or unknown type
+              // Files marked as 'irrelevant', 'not_relevant', or 'unknown' should go to Buffer2
+              // Only clear 'inflow' and 'outflow' files go to regular buffer
+              if (extractedInvoiceStatus === 'irrelevant' || extractedInvoiceStatus === 'not_relevant' || extractedInvoiceStatus === 'unknown') {
                 // Move to Buffer2 folder and log to Buffer2 sheet
                 try {
                   const now = new Date();
@@ -1090,6 +1193,9 @@ try {
                   
                   // Track successful processing
                   trackAttachmentProcessing(messageId, originalFilename, 'processed', `Non-invoice file moved to Buffer2: ${changedFilename}`);
+                  
+                  // Update thread stats (supplementary)
+                  updateThreadStats(threadContext.threadId, 'processed');
                   
                   // Log to Buffer2 sheet
                   const buffer2SheetName = `${companyName}-buffer2`;
@@ -1118,19 +1224,19 @@ try {
                   }
                   
                   // Log the non-invoice file to Buffer2 sheet
+                  // Use invoice date from AI extraction, fallback to current date
+                  const buffer2InvoiceDate = aiExtractedData.date ? new Date(aiExtractedData.date) : new Date();
+                  
                   buffer2Sheet.appendRow([
-                    new Date(),
+                    buffer2InvoiceDate,                   // Invoice Date (from AI extraction)
                     originalFilename,
                     changedFilename,
                     aiExtractedData.invoiceNumber || 'INV-Unknown',
-                    '', // Drive File ID (not available for Buffer2)
+                    buffer2File.getId(), // Use actual Buffer2 file ID
                     messageId,
                     '', // Relevance blank by default
                     '',  // UI blank by default
-                    '',
-                    aiExtractedData.invoiceCount || 1,
-                    attachment.getId ? attachment.getId() : '',
-                    messageId
+                    aiExtractedData.vendorName || 'Unknown' // Vendor Name
                   ]);
                   sortSheetByDateDesc(buffer2Sheet, 1);
                   setRelevanceDropdownValidation(buffer2Sheet);
@@ -1151,6 +1257,12 @@ try {
               const isDuplicateChangedFilename = existingChangedFilenamesInCurrentBuffer.has(changedFilename);
               let driveFile = null;
               let uniqueIdentifier = '';
+              let originalRowIndex = null;
+
+              if (isDuplicateChangedFilename) {
+                originalRowIndex = filenameToRowMap.get(changedFilename);
+                Logger.log(`Duplicate filename detected: ${changedFilename} (original in row ${originalRowIndex})`);
+              }
 
               if (!isDuplicateChangedFilename) {
                 // Store in Buffer/Active with the correct name
@@ -1160,9 +1272,21 @@ try {
                 const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
 
                 try {
-                  // Create the file with the changedFilename
+                  Logger.log(`Creating file in buffer folder with name: "${changedFilename}"`);
+                  
+                  // Create the file with the NEW AI-generated filename
                   const renamedBlob = attachment.copyBlob().setName(changedFilename);
                   driveFile = bufferActiveFolder.createFile(renamedBlob);
+                  
+                  Logger.log(`✓ File created successfully: "${driveFile.getName()}" (ID: ${driveFile.getId()})`);
+                  
+                  // Verify the file was created with correct name
+                  if (driveFile.getName() !== changedFilename) {
+                    Logger.log(`Warning: File created with different name. Expected: "${changedFilename}", Actual: "${driveFile.getName()}"`);
+                    // Rename the file to ensure it has the correct name
+                    driveFile.setName(changedFilename);
+                    Logger.log(`✓ File renamed to: "${changedFilename}"`);
+                  }
                   
                   // Generate unique identifier for the file - IMMEDIATELY after file creation
                   uniqueIdentifier = generateUniqueIdentifierForFile(driveFile.getId());
@@ -1172,18 +1296,50 @@ try {
                   existingChangedFilenamesInCurrentBuffer.add(changedFilename);
                   
                   // Track successful processing
-                  trackAttachmentProcessing(messageId, originalFilename, 'processed', `Successfully saved as ${changedFilename}`);
+                  trackAttachmentProcessing(messageId, originalFilename, 'processed', `Successfully renamed and saved: ${originalFilename} → ${changedFilename}`);
+                  
+                  // Update thread stats (supplementary)
+                  updateThreadStats(threadContext.threadId, 'processed');
+                  
+                  Logger.log(`✓ File processing completed: ${changedFilename} with UI: ${uniqueIdentifier}`);
                   
                 } catch (fileCreationError) {
-                  Logger.log(`Error creating file for attachment ${originalFilename}: ${fileCreationError.toString()}`);
+                  Logger.log(`✗ Error creating file for attachment ${originalFilename}: ${fileCreationError.toString()}`);
                   logProcessingError(messageId, originalFilename, fileCreationError.toString(), 'file_creation');
                   trackAttachmentProcessing(messageId, originalFilename, 'failed', `File creation failed: ${fileCreationError.message}`);
                   continue; // Skip to next attachment
                 }
 
-                // Use previously extracted AI data for invoice status
-                const emailSubject = message.getSubject ? message.getSubject() : '';
-                const invoiceStatus = extractedInvoiceStatus || "unknown";
+                              // Use previously extracted AI data for invoice status
+              const emailSubject = message.getSubject ? message.getSubject() : '';
+              const invoiceStatus = extractedInvoiceStatus || "unknown";
+              
+              // Enhanced debug logging for invoice status determination
+              Logger.log(`\n=== CLASSIFICATION DECISION FOR ${changedFilename} ===`);
+              Logger.log(`Original filename: ${originalFilename}`);
+              Logger.log(`New filename: ${changedFilename}`);
+              Logger.log(`AI extracted status: ${extractedInvoiceStatus}`);
+              Logger.log(`Final status: ${invoiceStatus}`);
+              Logger.log(`Document type: ${aiExtractedData.documentType || 'unknown'}`);
+              Logger.log(`Vendor: ${aiExtractedData.vendorName || 'unknown'}`);
+              Logger.log(`Invoice number: ${aiExtractedData.invoiceNumber || 'unknown'}`);
+              Logger.log(`Amount: ${aiExtractedData.amount || 'unknown'}`);
+              Logger.log(`Is financial document: ${aiExtractedData.isFinancialDocument}`);
+              
+              if (invoiceStatus === 'irrelevant' || invoiceStatus === 'not_relevant' || invoiceStatus === 'unknown') {
+                Logger.log(`✓ ROUTING: Buffer2 (NON-FINANCIAL/IRRELEVANT/UNKNOWN document)`);
+                Logger.log(`  → Will be saved to Buffer2 folder for manual review`);
+              } else if (invoiceStatus === 'inflow') {
+                Logger.log(`✓ ROUTING: Regular Buffer → Inflow folder (MONEY COMING IN)`);
+                Logger.log(`  → This appears to be a sales invoice or payment received`);
+              } else if (invoiceStatus === 'outflow') {
+                Logger.log(`✓ ROUTING: Regular Buffer → Outflow folder (MONEY GOING OUT)`);
+                Logger.log(`  → This appears to be a purchase invoice or expense`);
+              } else {
+                Logger.log(`✓ ROUTING: Regular Buffer → Manual review needed (UNCLEAR STATUS)`);
+                Logger.log(`  → Could not determine if inflow or outflow`);
+              }
+              Logger.log(`=== END CLASSIFICATION ===\n`);
 
                 // Log to main sheet
                 let mainSheet = ss.getSheetByName(companyName);
@@ -1191,14 +1347,18 @@ try {
                   mainSheet = ss.insertSheet(companyName);
                   mainSheet.appendRow(MAIN_SHEET_HEADERS);
                 }
+                // Use invoice date from AI extraction, fallback to current date
+                const mainSheetInvoiceDate = aiExtractedData.date ? new Date(aiExtractedData.date) : now;
+                
                 logFileToMainSheet(mainSheet, driveFile, emailSubject, messageId, invoiceStatus, companyName, uniqueIdentifier, {
-                  date: now.toISOString().split('T')[0],
-                  month: getMonthFromDate(now),
-                  fy: calculateFinancialYear(now),
+                  date: mainSheetInvoiceDate.toISOString().split('T')[0],
+                  month: getMonthFromDate(mainSheetInvoiceDate),
+                  fy: calculateFinancialYear(mainSheetInvoiceDate),
                   gst: aiExtractedData.gst || '',
                   tds: aiExtractedData.tds || '',
                   ot: aiExtractedData.ot || '',
-                  na: aiExtractedData.na || ''
+                  na: aiExtractedData.na || '',
+                  vendorName: aiExtractedData.vendorName || 'Unknown'
                 });
 
                 // If inflow/outflow, create a true copy in the inflow/outflow folder
@@ -1246,14 +1406,18 @@ try {
                     }
                   }
                   if (flowFile) {
+                    // Use invoice date from AI extraction, fallback to current date
+                    const flowSheetInvoiceDate = aiExtractedData.date ? new Date(aiExtractedData.date) : now;
+                    
                     logFileToMainSheet(flowSheet, flowFile, emailSubject, messageId, invoiceStatus, companyName, uniqueIdentifier, {
-                      date: now.toISOString().split('T')[0],
-                      month: getMonthFromDate(now),
-                      fy: calculateFinancialYear(now),
+                      date: flowSheetInvoiceDate.toISOString().split('T')[0],
+                      month: getMonthFromDate(flowSheetInvoiceDate),
+                      fy: calculateFinancialYear(flowSheetInvoiceDate),
                       gst: aiExtractedData.gst || '',
                       tds: aiExtractedData.tds || '',
                       ot: aiExtractedData.ot || '',
-                      na: aiExtractedData.na || ''
+                      na: aiExtractedData.na || '',
+                      vendorName: aiExtractedData.vendorName || 'Unknown'
                     });
                   }
                 }
@@ -1264,33 +1428,43 @@ try {
                 
                 // Track duplicate detection
                 trackAttachmentProcessing(messageId, originalFilename, 'skipped', `Duplicate filename: ${changedFilename}`);
+                // Update thread stats (supplementary)
+                updateThreadStats(threadContext.threadId, 'skipped');
                 skippedAttachments++;
                 attachmentsProcessedForThisMessage++;
               }
 
-              // Append to buffer sheet with AI-extracted data
+              // Append to buffer sheet with comprehensive AI-extracted data
+              const aiReason = `AI Classification: ${extractedInvoiceStatus.toUpperCase()} | Type: ${aiExtractedData.documentType || 'document'} | Vendor: ${aiExtractedData.vendorName || 'Unknown'} | Amount: ${aiExtractedData.amount || '0.00'}`;
+              
+              // Use invoice date from AI extraction, fallback to current date
+              const invoiceDate = aiExtractedData.date ? new Date(aiExtractedData.date) : new Date();
+              
               const rowData = [
-                new Date(),
-                originalFilename,
-                changedFilename,
-                aiExtractedData.invoiceNumber || 'INV-Unknown', // Use AI-extracted invoice number
-                driveFile ? driveFile.getId() : '', // Drive File ID
+                invoiceDate,                             // Invoice Date (from AI extraction)
+                originalFilename,                        // Original filename
+                changedFilename,                         // NEW AI-generated filename
+                aiExtractedData.invoiceNumber || generateInvoiceNumber(), // AI-extracted or generated invoice number
+                driveFile ? driveFile.getId() : '',      // Drive File ID
                 messageId,                               // Gmail Message ID
-                `AI: ${aiExtractedData.documentType || 'document'} | Amount: ${aiExtractedData.amount || '0.00'}`, // Enhanced reason with AI data
+                aiReason,                                // Comprehensive reason with AI classification
                 'Active',                                // Default Status (Active)
-                uniqueIdentifier,                         // UI (unique identifier)
-                '',
-                aiExtractedData.invoiceCount || 1,
-                attachment.getId ? attachment.getId() : '',
-                messageId
+                uniqueIdentifier,                        // UI (unique identifier)
+                '',                                      // Repeated field (will be updated for duplicates)
+                aiExtractedData.invoiceCount || 1,       // Invoice count
+                attachment.getId ? attachment.getId() : '', // Attachment ID
+                messageId,                               // Email ID
+                aiExtractedData.vendorName || 'Unknown'  // Vendor Name
               ];
+              
+              Logger.log(`Buffer sheet row data: ${JSON.stringify(rowData)}`);
               bufferSheet.appendRow(rowData);
               sortSheetByDateDesc(bufferSheet, 1);
               const newRowIndex = bufferSheet.getLastRow();
 
-              // If it's a duplicate, color the entire row yellow
-              if (isDuplicateChangedFilename) {
-                bufferSheet.getRange(newRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFFF00'); // Yellow
+              // Enhanced duplicate handling with coloring and row references
+              if (isDuplicateChangedFilename && originalRowIndex) {
+                handleDuplicateFileColoring(bufferSheet, changedFilename, newRowIndex, originalRowIndex);
               }
 
               try {
@@ -1342,8 +1516,20 @@ try {
     const processingReport = createProcessingReport(companyName);
     
     let resultMessage = `Completed processing for '${labelName}'. `;
+    
+    // Add new company creation message if applicable
+    if (isNewCompany) {
+      resultMessage += `🆕 New company folder structure created for '${companyName}' in parent directory. `;
+    }
+    
     resultMessage += `Emails analyzed: ${emailsAnalyzed}, New emails: ${emailsAnalyzed - emailsSkipped}. `;
     resultMessage += `Attachments processed: ${processedAttachments}, Skipped: ${skippedAttachments}. `;
+    
+    // Add supplementary thread insights to message
+    const threadSummary = getThreadSummary();
+    if (threadSummary.totalThreads > 0) {
+      resultMessage += `📧 Thread recognition: ${threadSummary.totalThreads} conversations analyzed, ${threadSummary.singleSenderThreads} single-sender threads detected. `;
+    }
     
     // Add warnings for incomplete processing
     if (processingReport.incompleteEmails.length > 0) {
@@ -1366,6 +1552,20 @@ try {
     Logger.log(`- Attachments failed: ${processingReport.attachmentsFailed}`);
     Logger.log(`- Incomplete emails: ${processingReport.incompleteEmails.length}`);
     Logger.log(`- Errors logged: ${processingReport.errors.length}`);
+    
+    // Log supplementary thread analysis
+    const detailedThreadSummary = getThreadSummary();
+    if (detailedThreadSummary.totalThreads > 0) {
+      Logger.log(`\n=== THREAD RECOGNITION ANALYSIS (Supplementary) ===`);
+      Logger.log(`- Gmail threads processed: ${detailedThreadSummary.totalThreads}`);
+      Logger.log(`- Single-sender threads: ${detailedThreadSummary.singleSenderThreads}`);
+      Logger.log(`- Recurring conversations: ${detailedThreadSummary.recurringConversations}`);
+      Logger.log(`- Top senders by attachments:`);
+      detailedThreadSummary.topSenders.forEach((sender, index) => {
+        Logger.log(`  ${index + 1}. ${sender.name}: ${sender.attachments} attachments, ${sender.emails} emails`);
+      });
+      Logger.log(`=== END THREAD ANALYSIS ===\n`);
+    }
     
     // After processing into company folder, automatically trigger the buffer processing for this company
     processBufferFilesAndLog(labelName);
@@ -1391,6 +1591,22 @@ try {
 function processBufferFilesAndLog(companyName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
+
+  // Load existing company folder mappings from script properties
+  loadCompanyFolderMappings();
+
+  // Ensure company folder exists (create if needed)
+  if (!ATTACHMENT_COMPANY_FOLDER_MAP[companyName]) {
+    Logger.log(`Company '${companyName}' not found in folder mapping. Creating new folder structure...`);
+    
+    try {
+      const newCompanyFolderId = createCompanyFolderStructure(companyName);
+      Logger.log(`Successfully created company folder structure for '${companyName}' with ID: ${newCompanyFolderId}`);
+    } catch (createError) {
+      Logger.log(`Error: Failed to create folder structure for company '${companyName}': ${createError.message}`);
+      return;
+    }
+  }
 
   const bufferSheet = ss.getSheetByName(`${companyName}-buffer`);
   if (!bufferSheet) {
@@ -1486,12 +1702,12 @@ function processBufferFilesAndLog(companyName) {
 
   for (let i = 1; i < bufferData.length; i++) { // Start from 1 to skip header row
     const row = bufferData[i];
-    const originalFilename = row[0];
-    const changedFilename = row[1];
-    let driveFileId = row[3]; // This can be updated
-    const gmailMessageId = row[4];
-    const status = row[6]; // Status column
-    const existingAnimalName = row[7]; // UI column (unique identifier)
+    const originalFilename = row[1]; // OriginalFileName (column 2, index 1)
+    const changedFilename = row[2];   // ChangedFilename (column 3, index 2) - THE SOURCE OF TRUTH
+    let driveFileId = row[4];         // Drive File ID (column 5, index 4)
+    const gmailMessageId = row[5];    // Gmail Message ID (column 6, index 5)
+    const status = row[7];            // Status (column 8, index 7)
+    const existingAnimalName = row[8]; // UI (column 9, index 8)
     const bufferRowIndex = i + 1; // 1-indexed row number in the sheet
 
     // Only process 'Active' files that have a valid Drive File ID (or a placeholder 'DELETED' that needs to be re-created)
@@ -1594,14 +1810,18 @@ function processBufferFilesAndLog(companyName) {
 
 
         // 5. Log to main sheet (sheet only, no drive storage)
+        // Use invoice date from AI extraction, fallback to file creation date
+        const processBufferInvoiceDate = aiResult.date ? new Date(aiResult.date) : fileDate;
+        
         logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
-          date: now.toISOString().split('T')[0],
-          month: getMonthFromDate(now),
-          fy: calculateFinancialYear(now),
-          gst: aiExtractedData.gst || '',
-          tds: aiExtractedData.tds || '',
-          ot: aiExtractedData.ot || '',
-          na: aiExtractedData.na || ''
+          date: processBufferInvoiceDate.toISOString().split('T')[0],
+          month: getMonthFromDate(processBufferInvoiceDate),
+          fy: calculateFinancialYear(processBufferInvoiceDate),
+          gst: aiResult.gst || '',
+          tds: aiResult.tds || '',
+          ot: aiResult.ot || '',
+          na: aiResult.na || '',
+          vendorName: aiResult.vendorName || 'Unknown'
         });
 
         // 6. Copy to inflow or outflow if appropriate (both sheet and drive)
@@ -1622,14 +1842,18 @@ function processBufferFilesAndLog(companyName) {
           const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
           
           // Use logFileToMainSheet which gets UI from buffer sheet
+          // Use invoice date from AI extraction, fallback to file creation date
+          const flowBufferInvoiceDate = aiResult.date ? new Date(aiResult.date) : fileDate;
+          
           logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
-            date: now.toISOString().split('T')[0],
-            month: getMonthFromDate(now),
-            fy: calculateFinancialYear(now),
-            gst: aiExtractedData.gst || '',
-            tds: aiExtractedData.tds || '',
-            ot: aiExtractedData.ot || '',
-            na: aiExtractedData.na || ''
+            date: flowBufferInvoiceDate.toISOString().split('T')[0],
+            month: getMonthFromDate(flowBufferInvoiceDate),
+            fy: calculateFinancialYear(flowBufferInvoiceDate),
+            gst: aiResult.gst || '',
+            tds: aiResult.tds || '',
+            ot: aiResult.ot || '',
+            na: aiResult.na || '',
+            vendorName: aiResult.vendorName || 'Unknown'
           });
         }
 
@@ -1640,7 +1864,7 @@ function processBufferFilesAndLog(companyName) {
 
       } catch (e) {
         Logger.log(`Error processing buffer row for file ID ${driveFileId} (Row ${bufferRowIndex}): ${e.toString()}`);
-        ui.alert('Error', `Could not process file "${originalFilename}" from buffer (Row ${bufferRowIndex}): ${e.message}`, ui.ButtonSet.OK);
+        ui.alert('Error', `Could not process file "${changedFilename}" from buffer (Row ${bufferRowIndex}): ${e.message}`, ui.ButtonSet.OK);
         bufferSheet.getRange(bufferRowIndex, 6).setValue(`Error: ${e.message}`); // Log error reason
         bufferSheet.getRange(bufferRowIndex, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FF0000'); // Red background for error
       }
@@ -1858,154 +2082,211 @@ function duplicateLogAndFiles(sourceLabel, targetLabels, companyFolderMap) {
 
 
 /**
- * Enhanced Gemini AI integration for comprehensive file data extraction.
- * Detects single or multiple invoices and extracts data accordingly.
+ * Enhanced Gemini AI integration with retries and text fallback for robust extraction.
  * @param {GoogleAppsScript.Base.Blob} fileBlob The content of the file.
  * @param {string} fileName The name of the file.
- * @returns {Object} An object containing extracted data, invoice status, and multi-invoice info.
+ * @returns {Object} Extracted data.
  */
 function callGeminiAPIInternal(fileBlob, fileName) {
-  Logger.log(`Calling Gemini AI for comprehensive data extraction from: ${fileName}`);
+  Logger.log(`Calling enhanced Gemini AI for: ${fileName}`);
   
-  // Get API key from script properties (set this in your Google Apps Script project)
   const API_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  
   if (!API_KEY) {
-    Logger.log('Warning: GEMINI_API_KEY not found in script properties. Using fallback extraction.');
+    Logger.log('Warning: GEMINI_API_KEY not found. Using fallback.');
     return fallbackDataExtraction(fileBlob, fileName);
   }
   
   const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  const maxRetries = 2;
   
-  try {
-    // Convert file to base64
-    const imageData = Utilities.base64Encode(fileBlob.getBytes());
-    const mimeType = fileBlob.getContentType();
-    
-    // Enhanced prompt for multi-invoice detection and extraction
-    const prompt = `Analyze this document carefully and determine if it contains single or multiple invoices/bills/receipts.\n\nIf SINGLE invoice/document, respond with:\n{\n  "isMultiInvoice": false,\n  "invoiceData": {\n    "date": "YYYY-MM-DD format date",\n    "vendorName": "Company or vendor name (clean, no special characters)",\n    "invoiceNumber": "Invoice/bill/reference number",\n    "amount": "Total amount as number (no currency symbols)",\n    "invoiceStatus": "inflow or outflow or unknown",\n    "documentType": "type of document (invoice, receipt, bill, etc.)",\n    "gst": "GST number if present, else blank",\n    "tds": "TDS value if present, else blank"\n  }\n}\n\nIf MULTIPLE invoices/documents, respond with:\n{\n  "isMultiInvoice": true,\n  "invoiceData": [\n    {\n      "date": "YYYY-MM-DD format date",\n      "vendorName": "Company or vendor name (clean, no special characters)",\n      "invoiceNumber": "Invoice/bill/reference number",\n      "amount": "Amount as number (no currency symbols)",\n      "invoiceStatus": "inflow or outflow or unknown",\n      "documentType": "type of document (invoice, receipt, bill, etc.)",\n      "pageNumber": "Page number or position in document",\n      "gst": "GST number if present, else blank",\n      "tds": "TDS value if present, else blank"\n    }\n  ]\n}\n\nIMPORTANT RULES:\n1. Look for multiple invoice numbers, different vendor names, different dates, or separate line items that represent distinct transactions\n2. For invoiceStatus: 'inflow' = money coming in (sales invoices, receipts), 'outflow' = money going out (purchase invoices, bills, expenses)\n3. Clean vendor names (remove special characters, keep only alphanumeric and spaces)\n4. Each invoice must have a unique invoice number - if numbers are the same, it's likely a single invoice\n5. If any field cannot be determined, use appropriate defaults: date='${getCurrentDateString()}', vendorName='UnknownVendor', invoiceNumber='INV-Unknown', amount='0.00'\n6. Amount should be just the number without currency symbols\n7. For multi-invoice files, ensure each invoice has distinct data\n8. Respond ONLY with valid JSON, no additional text`;
-    
-    const payload = {
-      contents: [{
-        parts: [
-          { text: prompt },
-          { 
-            inlineData: { 
-              mimeType: mimeType, 
-              data: imageData 
-            } 
-          }
-        ]
-      }],
-      generationConfig: {
-        temperature: 0.1,
-        topK: 32,
-        topP: 1,
-        maxOutputTokens: 2048, // Increased for multi-invoice responses
-      }
-    };
-    
-    const options = {
-      method: 'POST',
-      contentType: 'application/json',
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    };
-    
-    const response = UrlFetchApp.fetch(GEMINI_URL, options);
-    const responseText = response.getContentText();
-    
-    Logger.log(`Gemini API Response Code: ${response.getResponseCode()}`);
-    
-    if (response.getResponseCode() !== 200) {
-      Logger.log(`Gemini API Error: ${responseText}`);
-      return fallbackDataExtraction(fileBlob, fileName);
-    }
-    
-    const jsonResponse = JSON.parse(responseText);
-    
-    if (jsonResponse.candidates && jsonResponse.candidates[0] && 
-        jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const imageData = Utilities.base64Encode(fileBlob.getBytes());
+      const mimeType = fileBlob.getContentType();
       
+      // Enhanced prompt: Emphasize extraction even if partial, with fallbacks
+      const prompt = `Analyze this document and extract key information. Be robust: If it's not a clear invoice/bill, still attempt to extract any visible date, vendor, number, and amount. Classify strictly but provide best-guess data.
+
+STRICT RULES:
+- If partial data (e.g., missing invoice number but has amount/date/vendor), classify as "irrelevant" but STILL extract available fields.
+- For unclear docs, use filename hints if needed.
+- NEVER leave fields empty - use "NA" or "0.00" as defaults.
+
+CLASSIFICATION RULES:
+1. INVOICE/BILL CRITERIA (MUST HAVE ALL for inflow/outflow):
+   - Explicit "Invoice" or "Bill" label.
+   - Invoice/Reference number.
+   - Total billed amount.
+   - Date (issue or due).
+   - Billed from/to parties (vendor/customer).
+
+2. FINANCIAL but NON-INVOICE → "irrelevant".
+3. NON-FINANCIAL → "irrelevant".
+4. INFLOW/OUTFLOW (only for true invoices/bills):
+   - INFLOW: You are the seller.
+   - OUTFLOW: You are the buyer.
+   - If unclear but meets criteria → default to "outflow".
+
+TASK: Respond with VALID JSON ONLY. If extraction fails for a field, use "NA" but NEVER empty strings:
+{
+  "documentType": "invoice|bill|statement|report|contract|email|other",
+  "date": "YYYY-MM-DD (extract or use current if missing)",
+  "vendorName": "Vendor/company name (cleaned)",
+  "invoiceNumber": "Invoice/ref number (or 'NA' if not an invoice)",
+  "amount": "Total as number (or '0.00' if not an invoice)",
+  "invoiceStatus": "inflow|outflow|irrelevant",
+  "isFinancialDocument": true|false,
+  "reason": "Brief explanation of classification",
+  "isMultiInvoice": true|false,
+  "totalInvoices": number,
+  "gst": "GST amount or empty",
+  "tds": "TDS amount or empty",
+  "ot": "Other taxes or empty",
+  "na": "Additional notes or empty"
+}`;
+      
+      const payload = {
+        contents: [{
+          parts: [
+            { text: prompt },
+            { 
+              inlineData: { 
+                mimeType: mimeType, 
+                data: imageData 
+              } 
+            }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          topK: 10,
+          topP: 0.8,
+          maxOutputTokens: 2048,
+        }
+      };
+      
+      const options = {
+        method: 'POST',
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true
+      };
+      
+      const response = UrlFetchApp.fetch(GEMINI_URL, options);
+      if (response.getResponseCode() !== 200) {
+        throw new Error(`API error: ${response.getContentText()}`);
+      }
+      
+      const jsonResponse = JSON.parse(response.getContentText());
       const aiText = jsonResponse.candidates[0].content.parts[0].text.trim();
-      Logger.log(`Raw AI Response: ${aiText}`);
+      const cleanedText = aiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       
-      // Parse JSON response from AI
       try {
-        // Clean the response - remove any markdown formatting
-        const cleanedText = aiText.replace(/```json\n?|```\n?/g, '').trim();
         const extractedData = JSON.parse(cleanedText);
-        
-        // Process single or multi-invoice data
-        const processedData = processMultiInvoiceData(extractedData, fileName);
-        Logger.log(`Processed multi-invoice data: ${JSON.stringify(processedData)}`);
-        
-        return processedData;
-        
+        const validatedData = validateAIClassification(extractedData, fileName);
+        return processAIExtractedData(validatedData, fileName);
       } catch (parseError) {
-        Logger.log(`Error parsing AI JSON response: ${parseError.toString()}`);
-        Logger.log(`Attempting to extract data from text: ${aiText}`);
-        
-        // Try to extract data using regex if JSON parsing fails
-        return extractDataFromText(aiText, fileName);
+        Logger.log(`JSON parse failed on attempt ${attempt}: ${parseError}. Trying text extraction.`);
+        // Fallback: Extract from raw text if JSON fails
+        const textExtracted = extractDataFromText(aiText, fileName);
+        return validateAIClassification(textExtracted, fileName);  // Treat text-extracted as AI data
       }
-    } else {
-      Logger.log('Unexpected Gemini API response structure');
-      return fallbackDataExtraction(fileBlob, fileName);
+    } catch (error) {
+      Logger.log(`Attempt ${attempt} failed for ${fileName}: ${error}`);
+      if (attempt === maxRetries) {
+        Logger.log(`All retries failed. Using fallback extraction.`);
+        return fallbackDataExtraction(fileBlob, fileName);
+      }
+      Utilities.sleep(1000);  // Delay before retry
     }
-    
-  } catch (error) {
-    Logger.log(`Error calling Gemini API: ${error.toString()}`);
-    return fallbackDataExtraction(fileBlob, fileName);
   }
 }
 
 /**
- * Processes multi-invoice data from AI response
+ * Validates and potentially reclassifies AI output using rule-based logic.
+ * Ensures only true invoices/bills are classified as inflow/outflow.
+ * @param {Object} aiData - Raw data from AI.
+ * @param {string} fileName - Original filename for additional checks.
+ * @returns {Object} Validated data.
+ */
+function validateAIClassification(aiData, fileName) {
+  const lowerFileName = fileName.toLowerCase();
+  
+  // Required elements for a true invoice/bill
+  const hasInvoiceNumber = aiData.invoiceNumber && aiData.invoiceNumber !== 'NA' && aiData.invoiceNumber.trim() !== '';
+  const hasAmount = parseFloat(aiData.amount) > 0;
+  const hasDate = validateDate(aiData.date) !== null;
+  const hasVendor = aiData.vendorName && aiData.vendorName.trim() !== '';
+  
+  // If missing any required elements, reclassify as 'irrelevant'
+  if (!hasInvoiceNumber || !hasAmount || !hasDate || !hasVendor) {
+    Logger.log(`Reclassifying ${fileName} as 'irrelevant': Missing required invoice elements (number=${hasInvoiceNumber}, amount=${hasAmount}, date=${hasDate}, vendor=${hasVendor})`);
+    aiData.invoiceStatus = 'irrelevant';
+    aiData.documentType = aiData.documentType || 'other'; // Preserve type if set
+    aiData.reason = (aiData.reason || '') + ' | Reclassified: Missing core invoice elements';
+    aiData.invoiceNumber = 'NA';
+    aiData.amount = '0.00';
+    return aiData;
+  }
+  
+  // Additional checks: If documentType isn't invoice/bill, reclassify
+  const isTrueInvoiceType = ['invoice', 'bill'].includes(aiData.documentType.toLowerCase());
+  if (!isTrueInvoiceType) {
+    Logger.log(`Reclassifying ${fileName} as 'irrelevant': Document type '${aiData.documentType}' is not a true invoice/bill`);
+    aiData.invoiceStatus = 'irrelevant';
+    aiData.reason = (aiData.reason || '') + ' | Reclassified: Not a true invoice/bill type';
+    return aiData;
+  }
+  
+  // Filename pattern overrides: If filename suggests non-invoice (e.g., 'statement.pdf'), reclassify
+  const nonInvoicePatterns = ['statement', 'report', 'contract', 'email', 'photo', 'image', 'screenshot'];
+  if (nonInvoicePatterns.some(pattern => lowerFileName.includes(pattern))) {
+    Logger.log(`Reclassifying ${fileName} as 'irrelevant': Filename suggests non-invoice pattern`);
+    aiData.invoiceStatus = 'irrelevant';
+    aiData.reason = (aiData.reason || '') + ' | Reclassified: Filename pattern mismatch';
+    return aiData;
+  }
+  
+  // If all checks pass, keep AI's classification
+  Logger.log(`Validated ${fileName} as true invoice/bill: Status=${aiData.invoiceStatus}`);
+  return aiData;
+}
+
+/**
+ * Processes AI extracted data and validates it
  * @param {Object} aiData - Raw data from AI
  * @param {string} fileName - Original filename for fallback
  * @returns {Object} Processed data with validation
  */
-function processMultiInvoiceData(aiData, fileName) {
+function processAIExtractedData(aiData, fileName) {
   try {
-    if (aiData.isMultiInvoice) {
-      // Multi-invoice processing
-      const invoices = aiData.invoiceData || [];
-      const processedInvoices = invoices.map((invoice, index) => {
-        return validateAndSanitizeExtractedData(invoice, `${fileName}_invoice_${index + 1}`);
-      });
-      
-      // Filter out invalid invoices (those with default values only)
-      const validInvoices = processedInvoices.filter(invoice => 
-        invoice.invoiceNumber !== 'INV-Unknown' || 
-        invoice.vendorName !== 'UnknownVendor' ||
-        invoice.amount !== '0.00'
-      );
-      
-      if (validInvoices.length === 0) {
-        Logger.log(`No valid invoices found in multi-invoice file: ${fileName}`);
-        return fallbackDataExtraction(null, fileName);
-      }
-      
-      return {
-        isMultiInvoice: true,
-        invoiceCount: validInvoices.length,
-        invoices: validInvoices,
-        // For backward compatibility, return first invoice data at root level
-        ...validInvoices[0]
-      };
-    } else {
-      // Single invoice processing
-      const singleInvoiceData = validateAndSanitizeExtractedData(aiData.invoiceData || aiData, fileName);
-      return {
-        isMultiInvoice: false,
-        invoiceCount: 1,
-        invoices: [singleInvoiceData],
-        ...singleInvoiceData
-      };
-    }
+    Logger.log(`Processing AI data for ${fileName}: ${JSON.stringify(aiData)}`);
+    
+    // Simple single document processing (no multi-invoice for now)
+    const processedData = {
+      isMultiInvoice: false,
+      invoiceCount: 1,
+      date: validateDate(aiData.date) || getCurrentDateString(),
+      vendorName: sanitizeVendorName(aiData.vendorName) || extractVendorFromFilename(fileName),
+      invoiceNumber: sanitizeInvoiceNumber(aiData.invoiceNumber) || extractInvoiceIdFromFilename(fileName) || generateInvoiceNumber(),
+      amount: validateAmount(aiData.amount) || '0.00',
+      invoiceStatus: validateAndNormalizeInvoiceStatus(aiData.invoiceStatus, aiData.isFinancialDocument),
+      documentType: aiData.documentType || 'document',
+      gst: aiData.gst || '',
+      tds: aiData.tds || '',
+      ot: aiData.ot || '',
+      na: aiData.na || ''
+    };
+    
+    Logger.log(`Processed AI data result: Status=${processedData.invoiceStatus}, Vendor=${processedData.vendorName}, Invoice=${processedData.invoiceNumber}`);
+    
+    return {
+      ...processedData,
+      invoices: [processedData]
+    };
+    
   } catch (error) {
-    Logger.log(`Error processing multi-invoice data: ${error.toString()}`);
+    Logger.log(`Error processing AI extracted data: ${error.toString()}`);
     return fallbackDataExtraction(null, fileName);
   }
 }
@@ -2019,117 +2300,150 @@ function processMultiInvoiceData(aiData, fileName) {
 function validateAndSanitizeExtractedData(data, fileName) {
   const currentDate = getCurrentDateString();
   
-  return {
+  const validatedData = {
     date: validateDate(data.date) || currentDate,
     vendorName: sanitizeVendorName(data.vendorName) || 'UnknownVendor',
     invoiceNumber: sanitizeInvoiceNumber(data.invoiceNumber) || extractInvoiceIdFromFilename(fileName) || 'INV-Unknown',
     amount: validateAmount(data.amount) || '0.00',
-    invoiceStatus: validateInvoiceStatus(data.invoiceStatus) || 'unknown',
+    invoiceStatus: validateInvoiceStatus(data.invoiceStatus) || 'outflow',
     documentType: data.documentType || 'document',
     gst: data.gst || '',
     tds: data.tds || '',
     ot: data.ot || '',
     na: data.na || ''
   };
+  
+  Logger.log(`Validated data for ${fileName}: Status=${validatedData.invoiceStatus}, Type=${validatedData.documentType}`);
+  return validatedData;
 }
 
 /**
- * Fallback data extraction when AI is not available
+ * Improved fallback data extraction when AI is not available
  * @param {GoogleAppsScript.Base.Blob} fileBlob - File content
  * @param {string} fileName - Original filename
  * @returns {Object} Extracted data using fallback methods
  */
-function fallbackDataExtraction(fileBlob, fileName) {
-  Logger.log(`Using fallback data extraction for: ${fileName}`);
-  
-  const lowerFileName = fileName.toLowerCase();
-  let invoiceStatus = 'unknown';
-  
-  // Simple logic based on filename
-  if (lowerFileName.includes('invoice') && !lowerFileName.includes('payment')) {
-    invoiceStatus = 'outflow';
-  } else if (lowerFileName.includes('receipt') || lowerFileName.includes('deposit') || lowerFileName.includes('credit')) {
-    invoiceStatus = 'inflow';
-  } else if (lowerFileName.includes('bill') || lowerFileName.includes('expense')) {
-    invoiceStatus = 'outflow';
-  }
-  
-  const fallbackData = {
-    date: getCurrentDateString(),
-    vendorName: 'UnknownVendor',
-    invoiceNumber: extractInvoiceIdFromFilename(fileName) || 'INV-Unknown',
-    amount: '0.00',
-    invoiceStatus: invoiceStatus,
-    documentType: 'document',
-    gst: '',
-    tds: '',
-    ot: '',
-    na: ''
-  };
-  
-  return {
-    isMultiInvoice: false,
-    invoiceCount: 1,
-    invoices: [fallbackData],
-    ...fallbackData
-  };
-}
-
 /**
- * Extracts data from text using regex when JSON parsing fails
- * @param {string} text - AI response text
- * @param {string} fileName - Original filename for fallback
- * @returns {Object} Extracted data
+ * Enhanced fallback with direct text extraction from file content.
+ * @param {GoogleAppsScript.Base.Blob} fileBlob File content.
+ * @param {string} fileName Original filename.
+ * @returns {Object} Extracted data.
  */
-function extractDataFromText(text, fileName) {
+function fallbackDataExtraction(fileBlob, fileName) {
+  Logger.log(`Enhanced fallback for: ${fileName}`);
+  
+  let text = '';
+  try {
+    // Convert to Google Doc for text extraction (handles PDFs/images via OCR)
+    const tempFile = DriveApp.createFile(fileBlob);
+    const doc = DocumentApp.openById(tempFile.getId());
+    text = doc.getBody().getText().toLowerCase();
+    tempFile.setTrashed(true);  // Cleanup
+  } catch (error) {
+    Logger.log(`Text extraction failed: ${error}. Using filename-only fallback.`);
+  }
+
   const data = {
     date: getCurrentDateString(),
     vendorName: 'UnknownVendor',
-    invoiceNumber: extractInvoiceIdFromFilename(fileName) || 'INV-Unknown',
+    invoiceNumber: 'NA',
     amount: '0.00',
-    invoiceStatus: 'unknown',
-    documentType: 'document',
-    gst: '',
-    tds: '',
-    ot: '',
-    na: ''
+    invoiceStatus: 'irrelevant',
+    documentType: 'other',
+    isFinancialDocument: false,
+    reason: 'Fallback extraction',
+    isMultiInvoice: false,
+    totalInvoices: 1
   };
-  
-  // Try to extract date (various formats)
-  const dateMatch = text.match(/\b(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})\b/);
-  if (dateMatch) {
-    data.date = standardizeDateFormat(dateMatch[1]);
+
+  // Extract from text (priority) or filename
+  const dateMatch = text.match(/date[:\s]*(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/i) || fileName.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) data.date = standardizeDateFormat(dateMatch[1]);
+
+  const vendorMatch = text.match(/(?:vendor|from|company)[:\s]*([A-Za-z\s&-]+)/i) || fileName.match(/^([A-Za-z\s&-]+)/);
+  if (vendorMatch) data.vendorName = sanitizeVendorName(vendorMatch[1]);
+
+  const invMatch = text.match(/(?:invoice|bill|ref)[\s#]*([A-Za-z0-9-]+)/i) || fileName.match(/inv-?([A-Za-z0-9-]+)/i);
+  if (invMatch) data.invoiceNumber = sanitizeInvoiceNumber(invMatch[1]);
+
+  const amtMatch = text.match(/total[:\s]*\$?([\d,.]+)/i) || fileName.match(/(\d+\.\d{2})/);
+  if (amtMatch) data.amount = validateAmount(amtMatch[1]);
+
+  // Status from keywords
+  if (text.match(/invoice|bill/i)) {
+    data.documentType = 'invoice';
+    data.isFinancialDocument = true;
+    data.invoiceStatus = text.match(/sales|inflow/i) ? 'inflow' : 'outflow';
+  } else if (text.match(/statement|report/i)) {
+    data.documentType = 'statement';
+    data.isFinancialDocument = true;
   }
-  
-  // Try to extract vendor name
-  const vendorMatch = text.match(/vendor[:\s]+([^\n,]+)/i) || text.match(/company[:\s]+([^\n,]+)/i);
-  if (vendorMatch) {
-    data.vendorName = sanitizeVendorName(vendorMatch[1].trim());
-  }
-  
-  // Try to extract invoice number
-  const invoiceMatch = text.match(/invoice[\s#:]+([A-Za-z0-9-]+)/i) || text.match(/\b(INV[0-9-]+)\b/i);
-  if (invoiceMatch) {
-    data.invoiceNumber = sanitizeInvoiceNumber(invoiceMatch[1]);
-  }
-  
-  // Try to extract amount
-  const amountMatch = text.match(/\$?([0-9,]+\.?[0-9]*)/g);
-  if (amountMatch && amountMatch.length > 0) {
-    // Get the largest amount (likely the total)
-    const amounts = amountMatch.map(a => parseFloat(a.replace(/[$,]/g, ''))).filter(a => !isNaN(a));
-    if (amounts.length > 0) {
-      data.amount = Math.max(...amounts).toFixed(2);
+
+  // If all extraction methods fail, use meaningful words from original filename
+  if (data.vendorName === 'UnknownVendor' && data.invoiceNumber === 'NA' && data.amount === '0.00') {
+    Logger.log(`All extraction methods failed, using filename-based fallback for: ${fileName}`);
+    data.reason = 'Filename-based fallback (all extraction methods failed)';
+    
+    // Extract meaningful components from original filename
+    const meaningfulFilename = generateFallbackFilenameFromOriginal(fileName);
+    const parts = meaningfulFilename.replace(/\.[^/.]+$/, '').split('_');
+    
+    if (parts.length >= 4) {
+      data.date = parts[0] || getCurrentDateString();
+      data.vendorName = parts[1] || 'Document';
+      data.invoiceNumber = parts[2] || 'REF-UNKNOWN';
+      data.amount = parts[3] || '0.00';
     }
   }
-  
-  // Try to extract invoice status
-  if (text.toLowerCase().includes('inflow')) {
-    data.invoiceStatus = 'inflow';
-  } else if (text.toLowerCase().includes('outflow')) {
-    data.invoiceStatus = 'outflow';
-  }
-  
+
+  Logger.log(`Fallback extracted: ${JSON.stringify(data)}`);
+  return data;
+}
+
+/**
+ * Extracts data from raw AI text response using regex when JSON fails.
+ * @param {string} text Raw AI response text.
+ * @param {string} fileName Original filename for fallbacks.
+ * @returns {Object} Extracted data.
+ */
+function extractDataFromText(text, fileName) {
+  const data = {
+    documentType: 'other',
+    date: getCurrentDateString(),
+    vendorName: extractVendorFromFilename(fileName) || 'UnknownVendor',
+    invoiceNumber: extractInvoiceIdFromFilename(fileName) || 'NA',
+    amount: '0.00',
+    invoiceStatus: 'irrelevant',
+    isFinancialDocument: false,
+    reason: 'Extracted from text (JSON failed)',
+    isMultiInvoice: false,
+    totalInvoices: 1
+  };
+
+  // Extract date (various formats)
+  const dateMatch = text.match(/date[:\s]*(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/i);
+  if (dateMatch) data.date = standardizeDateFormat(dateMatch[1]);
+
+  // Extract vendor
+  const vendorMatch = text.match(/vendorName[:\s]*"([^"]+)"/i) || text.match(/(?:vendor|company|from)[:\s]*([A-Za-z\s&-]+)/i);
+  if (vendorMatch) data.vendorName = sanitizeVendorName(vendorMatch[1]);
+
+  // Extract invoice number
+  const invMatch = text.match(/invoiceNumber[:\s]*"([^"]+)"/i) || text.match(/(?:invoice|ref|bill)[\s#]*([A-Za-z0-9-]+)/i);
+  if (invMatch) data.invoiceNumber = sanitizeInvoiceNumber(invMatch[1]);
+
+  // Extract amount
+  const amtMatch = text.match(/amount[:\s]*"([^"]+)"/i) || text.match(/total[:\s]*\$?([\d,.]+)/i);
+  if (amtMatch) data.amount = validateAmount(amtMatch[1]);
+
+  // Determine status from keywords
+  if (text.match(/inflow|sales|revenue/i)) data.invoiceStatus = 'inflow';
+  else if (text.match(/outflow|expense|bill/i)) data.invoiceStatus = 'outflow';
+
+  // Financial check
+  if (text.match(/financial|invoice|bill|amount/i)) data.isFinancialDocument = true;
+
+  Logger.log(`Text-extracted data for ${fileName}: ${JSON.stringify(data)}`);
   return data;
 }
 
@@ -2178,12 +2492,90 @@ function validateAmount(amount) {
 }
 
 function validateInvoiceStatus(status) {
-  if (!status) return null;
+  if (!status) return 'outflow'; // Default to outflow if no status
   const lowerStatus = status.toString().toLowerCase().trim();
-  if (['inflow', 'outflow', 'unknown'].includes(lowerStatus)) {
-    return lowerStatus;
+  
+  // Map various status terms to standard values
+  if (['inflow', 'income', 'revenue', 'sales', 'receipt', 'credit'].includes(lowerStatus)) {
+    return 'inflow';
+  } else if (['outflow', 'expense', 'purchase', 'bill', 'payment', 'cost'].includes(lowerStatus)) {
+    return 'outflow';
+  } else if (['irrelevant', 'not_relevant', 'non_financial', 'invalid'].includes(lowerStatus)) {
+    return 'irrelevant';
+  } else {
+    // If unclear, default to outflow (most business documents are expenses)
+    Logger.log(`Uncertain invoice status '${status}' - defaulting to outflow`);
+    return 'outflow';
   }
-  return null;
+}
+
+/**
+ * Enhanced invoice status validation that considers document type
+ * @param {string} status - The status from AI
+ * @param {boolean} isFinancialDocument - Whether this is a financial document
+ * @returns {string} Validated status
+ */
+function validateAndNormalizeInvoiceStatus(status, isFinancialDocument) {
+  if (!status) {
+    return isFinancialDocument === false ? 'irrelevant' : 'outflow';
+  }
+  
+  const lowerStatus = status.toString().toLowerCase().trim();
+  
+  // Handle non-financial documents first
+  if (isFinancialDocument === false || lowerStatus === 'irrelevant' || lowerStatus === 'non_financial') {
+    Logger.log(`Document classified as irrelevant/non-financial`);
+    return 'irrelevant';
+  }
+  
+  // Handle financial documents
+  if (['inflow', 'income', 'revenue', 'sales', 'receipt', 'credit', 'sale'].includes(lowerStatus)) {
+    Logger.log(`Document classified as INFLOW (money coming in)`);
+    return 'inflow';
+  } else if (['outflow', 'expense', 'purchase', 'bill', 'payment', 'cost', 'expenditure'].includes(lowerStatus)) {
+    Logger.log(`Document classified as OUTFLOW (money going out)`);
+    return 'outflow';
+  } else {
+    // Default for financial documents is outflow (most business docs are expenses)
+    Logger.log(`Uncertain financial document status '${status}' - defaulting to OUTFLOW`);
+    return 'outflow';
+  }
+}
+
+/**
+ * Extracts vendor name from filename as fallback
+ * @param {string} fileName - Original filename
+ * @returns {string} Extracted vendor name or default
+ */
+function extractVendorFromFilename(fileName) {
+  if (!fileName) return 'UnknownVendor';
+  
+  // Remove extension
+  const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
+  
+  // Try to extract company/vendor name patterns
+  const patterns = [
+    /^([A-Za-z\s&]+?)[-_\s]*(invoice|bill|receipt)/i,
+    /^([A-Za-z\s&]{3,20})/,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = nameWithoutExt.match(pattern);
+    if (match) {
+      return sanitizeVendorName(match[1]) || 'UnknownVendor';
+    }
+  }
+  
+  return 'UnknownVendor';
+}
+
+/**
+ * Generates a unique invoice number as fallback
+ * @returns {string} Generated invoice number
+ */
+function generateInvoiceNumber() {
+  const timestamp = new Date().getTime().toString().slice(-6);
+  return `INV-${timestamp}`;
 }
 
 /**
@@ -2289,18 +2681,227 @@ function onEdit(e) {
   const sheet = range.getSheet();
   const sheetName = sheet.getName();
 
-  // --- NEW: Handle Buffer2 sheet 'Relevance' column edits ---
+  // --- Handle Buffer2 sheet 'Relevance' column edits (Yes/No) ---
+  // Yes: Move file from Buffer2 to Buffer/Active and log in buffer & main sheets
+  // No: Move file from Buffer2 to Buffer/Active (existing functionality)
   if (
     sheetName.endsWith('-buffer2') &&
     range.getColumn() === BUFFER2_SHEET_HEADERS.indexOf('Relevance') + 1 &&
     range.getNumRows() === 1 &&
     range.getNumColumns() === 1
   ) {
-    const companyName = sheetName.replace('-buffer2', '');
+    let companyName = sheetName.replace('-buffer2', '');
     const editedRow = range.getRow();
     const newRelevance = e.value;
     const oldRelevance = e.oldValue;
     if (editedRow === 1 || newRelevance === oldRelevance) return;
+    
+    // Handle "Yes" selection - move file from Buffer2 to Buffer and log in main sheet
+    if (newRelevance === 'Yes') {
+      const rowData = sheet.getRange(editedRow, 1, 1, BUFFER2_SHEET_HEADERS.length).getValues()[0];
+      const date = rowData[0];
+      const originalFilename = rowData[1];
+      const changedFilename = rowData[2];
+      const invoiceId = rowData[3];
+      let driveFileId = rowData[4];
+      const gmailMessageId = rowData[5];
+      const ui = SpreadsheetApp.getUi();
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+      try {
+        // Validate input data
+        if (!changedFilename || changedFilename.trim() === '') {
+          ui.alert('Error', 'Filename is missing or empty. Cannot process.', ui.ButtonSet.OK);
+          return;
+        }
+        
+        Logger.log(`Processing Buffer2 relevance=Yes for file: ${changedFilename}`);
+        Logger.log(`Initial company from sheet name: ${companyName}`);
+        
+        // Try to extract company name from changed filename if sheet name doesn't work
+        const filenameCompany = extractCompanyFromFilename(changedFilename);
+        if (filenameCompany) {
+          Logger.log(`Company extracted from filename: ${filenameCompany}`);
+          companyName = filenameCompany;
+        }
+        
+        Logger.log(`Final company name: ${companyName}, Date: ${date}, Gmail ID: ${gmailMessageId}`);
+        
+        // Find the correct financial year (try from date, else current)
+        let fileDate = new Date(date);
+        if (isNaN(fileDate.getTime())) {
+          Logger.log(`Invalid date found: ${date}, using current date`);
+          fileDate = new Date();
+        }
+        const financialYear = calculateFinancialYear(fileDate);
+        Logger.log(`Using financial year: ${financialYear}`);
+        
+        // Ensure company folder mappings are loaded
+        loadCompanyFolderMappings();
+        
+        // Get or create company mapping
+        const validCompanyName = getOrCreateCompanyMapping(companyName);
+        if (!validCompanyName) {
+          Logger.log(`Failed to get or create company mapping for: ${companyName}`);
+          ui.alert('Error', `Could not find or create company folder for: ${companyName}. Available companies: ${Object.keys(ATTACHMENT_COMPANY_FOLDER_MAP).join(', ')}. Please contact administrator.`, ui.ButtonSet.OK);
+          return;
+        }
+        companyName = validCompanyName;
+        
+        // Create/get Buffer2 folder structure
+        const buffer2Folder = createBuffer2FolderStructure(companyName, financialYear);
+        Logger.log(`Buffer2 folder ID: ${buffer2Folder.getId()}`);
+        
+        // Validate Drive access to Buffer2 folder
+        if (!validateDriveAccess(buffer2Folder.getId())) {
+          ui.alert('Error', 'Insufficient permissions to access Buffer2 folder. Please contact administrator to grant Drive permissions.', ui.ButtonSet.OK);
+          return;
+        }
+        
+        // Find the file in Buffer2 folder
+        const files = buffer2Folder.getFilesByName(changedFilename);
+        if (!files.hasNext()) {
+          Logger.log(`File not found in Buffer2 folder: ${changedFilename}`);
+          ui.alert('Error', `File ${changedFilename} not found in Buffer2 folder. It may have been moved or deleted.`, ui.ButtonSet.OK);
+          return;
+        }
+        
+        const file = files.next();
+        driveFileId = file.getId();
+        Logger.log(`Found file in Buffer2, ID: ${driveFileId}`);
+        
+        // Validate file ID
+        if (!driveFileId || driveFileId.trim() === '') {
+          Logger.log(`Invalid file ID: ${driveFileId}`);
+          ui.alert('Error', 'Invalid file ID. Cannot move file.', ui.ButtonSet.OK);
+          return;
+        }
+
+        // Create/get Buffer/Active folder
+        const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, 'Active');
+        Logger.log(`Buffer/Active folder ID: ${bufferActiveFolder.getId()}`);
+        
+        // Validate Drive access to Buffer/Active folder
+        if (!validateDriveAccess(bufferActiveFolder.getId())) {
+          ui.alert('Error', 'Insufficient permissions to access Buffer/Active folder. Please contact administrator to grant Drive permissions.', ui.ButtonSet.OK);
+          return;
+        }
+        
+        // Validate folder IDs before moving
+        if (!bufferActiveFolder.getId() || !buffer2Folder.getId()) {
+          Logger.log(`Invalid folder IDs - Buffer/Active: ${bufferActiveFolder.getId()}, Buffer2: ${buffer2Folder.getId()}`);
+          ui.alert('Error', 'Invalid folder IDs. Cannot move file.', ui.ButtonSet.OK);
+          return;
+        }
+        
+        Logger.log(`Moving file ${changedFilename} from Buffer2 to Buffer/Active (Relevance=Yes)`);
+        Logger.log(`File ID: ${driveFileId}, Target: ${bufferActiveFolder.getId()}, Source: ${buffer2Folder.getId()}`);
+        
+        // Move the file
+        moveFileWithDriveApp(driveFileId, bufferActiveFolder.getId(), buffer2Folder.getId());
+
+        // Add log to buffer sheet if not already present
+        const bufferSheet = ss.getSheetByName(`${companyName}-buffer`);
+        let alreadyLogged = false;
+        if (bufferSheet) {
+          const bufferData = bufferSheet.getDataRange().getValues();
+          for (let i = 1; i < bufferData.length; i++) {
+            if (bufferData[i][2] === changedFilename || bufferData[i][4] === driveFileId) {
+              alreadyLogged = true;
+              break;
+            }
+          }
+        }
+        if (!alreadyLogged) {
+          // Generate UI if not present
+          let uniqueIdentifier = rowData[7];
+          if (!uniqueIdentifier) {
+            uniqueIdentifier = generateUniqueIdentifierForFile(driveFileId);
+          }
+          // Append to buffer sheet
+          bufferSheet.appendRow([
+            new Date(),
+            originalFilename,
+            changedFilename,
+            invoiceId,
+            driveFileId,
+            gmailMessageId,
+            'Moved from Buffer2 (Relevance=Yes)',
+            'Active',
+            uniqueIdentifier,
+            '',
+            1, // Invoice count default
+            '', // Attachment ID
+            gmailMessageId
+          ]);
+          sortSheetByDateDesc(bufferSheet, 1);
+          Logger.log(`Added file to buffer sheet: ${changedFilename}`);
+        }
+
+        // Add log to main sheet
+        const mainSheet = ss.getSheetByName(companyName);
+        if (mainSheet) {
+          // Check if already logged in main sheet
+          const mainData = mainSheet.getDataRange().getValues();
+          let alreadyInMain = false;
+          for (let i = 1; i < mainData.length; i++) {
+            if (mainData[i][1] === driveFileId || mainData[i][0] === changedFilename) {
+              alreadyInMain = true;
+              break;
+            }
+          }
+          if (!alreadyInMain) {
+            // Get email subject for main sheet logging
+            const emailSubject = getEmailSubjectForMessageId(gmailMessageId) || 'Unknown Subject';
+            
+            // Default to outflow status for files moved from Buffer2
+            const invoiceStatus = 'outflow';
+            
+            // Get unique identifier
+            let uniqueIdentifier = rowData[7];
+            if (!uniqueIdentifier) {
+              uniqueIdentifier = generateUniqueIdentifierForFile(driveFileId);
+            }
+            
+            // Log to main sheet
+            logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
+              date: fileDate.toISOString().split('T')[0],
+              month: getMonthFromDate(fileDate),
+              fy: calculateFinancialYear(fileDate),
+              gst: '',
+              tds: '',
+              ot: '',
+              na: ''
+            });
+            Logger.log(`Added file to main sheet: ${changedFilename}`);
+          }
+        }
+
+        // Remove the row from buffer2 sheet
+        setScriptEditFlag(true);
+        sheet.deleteRow(editedRow);
+        ui.alert('Success', `File ${changedFilename} moved to Buffer/Active and logged in buffer and main sheets.`, ui.ButtonSet.OK);
+        
+             } catch (err) {
+         Logger.log(`Error moving file from Buffer2 to Buffer (Relevance=Yes): ${err.toString()}`);
+         
+         // Provide specific error messages based on error type
+         let errorMessage = `Failed to move file from Buffer2 to Buffer: ${err.message}`;
+         
+         if (err.toString().includes('Invalid argument: id')) {
+           errorMessage = 'Invalid file or folder ID. The file may have been moved or deleted. Please refresh and try again.';
+         } else if (err.toString().includes('permissions') || err.toString().includes('auth')) {
+           errorMessage = 'Insufficient permissions to access Google Drive. Please contact administrator to grant proper Drive permissions.';
+         } else if (err.toString().includes('not found')) {
+           errorMessage = 'File or folder not found. The file may have been moved or deleted.';
+         }
+         
+         ui.alert('Error', errorMessage, ui.ButtonSet.OK);
+       }
+      return;
+    }
+    
+    // Handle "No" selection - move file from Buffer2 to Buffer/Active (existing functionality)
     if (newRelevance !== 'No') return;
 
     const rowData = sheet.getRange(editedRow, 1, 1, BUFFER2_SHEET_HEADERS.length).getValues()[0];
@@ -2313,12 +2914,29 @@ function onEdit(e) {
     const ui = SpreadsheetApp.getUi();
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
+    // Try to extract company name from changed filename if sheet name doesn't work
+    const filenameCompany = extractCompanyFromFilename(changedFilename);
+    if (filenameCompany) {
+      Logger.log(`Company extracted from filename for 'No' selection: ${filenameCompany}`);
+      companyName = filenameCompany;
+    }
+
     // Find the file in Buffer2 folder (by changedFilename)
     try {
       // Find the correct financial year (try from date, else current)
       let fileDate = new Date(date);
       if (isNaN(fileDate.getTime())) fileDate = new Date();
       const financialYear = calculateFinancialYear(fileDate);
+      
+      // Get or create company mapping
+      const validCompanyName = getOrCreateCompanyMapping(companyName);
+      if (!validCompanyName) {
+        Logger.log(`Failed to get or create company mapping for 'No' selection: ${companyName}`);
+        ui.alert('Error', `Could not find or create company folder for: ${companyName}. Please contact administrator.`, ui.ButtonSet.OK);
+        return;
+      }
+      companyName = validCompanyName;
+      
       const buffer2Folder = createBuffer2FolderStructure(companyName, financialYear);
       const files = buffer2Folder.getFilesByName(changedFilename);
       if (!files.hasNext()) {
@@ -2330,7 +2948,8 @@ function onEdit(e) {
 
       // Move file to Buffer/Active
       const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, 'Active');
-      moveFileWithDriveApi(file.getId(), bufferActiveFolder.getId(), buffer2Folder.getId());
+      Logger.log(`Moving file ${changedFilename} from Buffer2 to Buffer/Active`);
+      moveFileWithDriveApp(file.getId(), bufferActiveFolder.getId(), buffer2Folder.getId());
 
       // Add log to buffer sheet if not already present
       const bufferSheet = ss.getSheetByName(`${companyName}-buffer`);
@@ -2362,9 +2981,9 @@ function onEdit(e) {
           'Active',
           uniqueIdentifier,
           '',
-          aiExtractedData.invoiceCount || 1,
-          attachment.getId ? attachment.getId() : '',
-          messageId
+          1, // Invoice count default
+          '', // Attachment ID
+          gmailMessageId
         ]);
         sortSheetByDateDesc(bufferSheet, 1);
       }
@@ -2396,10 +3015,25 @@ function onEdit(e) {
     if (editedRow === 1 || newStatus === oldStatus) return;
 
     const rowData = sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).getValues()[0];
-    const changedFilename = rowData[1];
-    let driveFileId = rowData[3];
-    const gmailMessageId = rowData[4];
+    const originalFilename = rowData[1]; // OriginalFileName (column 2, index 1)
+    let changedFilename = rowData[2];     // ChangedFilename (column 3, index 2) - THE SOURCE OF TRUTH (let allows reassignment)
+    let driveFileId = rowData[4];         // Drive File ID (column 5, index 4)
+    const gmailMessageId = rowData[5];    // Gmail Message ID (column 6, index 5)
     const ui = SpreadsheetApp.getUi();
+
+    // Validate row data
+    Logger.log(`Processing buffer sheet row ${editedRow}:`);
+    Logger.log(`Original Filename: ${originalFilename}`);
+    Logger.log(`Changed Filename: ${changedFilename}`);
+    Logger.log(`Drive File ID: ${driveFileId}`);
+    Logger.log(`Gmail Message ID: ${gmailMessageId}`);
+    
+    if (!changedFilename || changedFilename.trim() === '') {
+      ui.alert('Error', 'Changed filename is missing in buffer sheet row. Cannot proceed.', ui.ButtonSet.OK);
+      setScriptEditFlag(true);
+      sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Active');
+      return;
+    }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const mainSheet = ss.getSheetByName(companyName);
@@ -2434,47 +3068,147 @@ function onEdit(e) {
 
         if (driveFileId && driveFileId !== 'DELETED') {
           try {
-            const file = DriveApp.getFileById(driveFileId);
+            Logger.log(`Attempting to delete file with ID: ${driveFileId}`);
+            
+            // Use the new file recovery function to find the file
+            const recoveryResult = findAndRecoverFile(companyName, changedFilename, driveFileId);
+            
+            if (!recoveryResult.file) {
+              throw new Error(`File "${changedFilename}" not found in any location. It may have already been moved or deleted manually.`);
+            }
+            
+            const file = recoveryResult.file;
+            Logger.log(`File recovery successful: Found "${file.getName()}" in ${recoveryResult.foundIn}`);
+            
+            // Update the buffer sheet with the correct file ID if it was recovered
+            if (recoveryResult.foundIn !== 'current_id') {
+              setScriptEditFlag(true);
+              sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Drive File ID') + 1).setValue(file.getId());
+              Logger.log(`Updated buffer sheet with recovered file ID: ${file.getId()}`);
+            }
+            
+            // If the actual filename is different from what's in the buffer sheet, update it
+            const actualFilename = file.getName();
+            if (actualFilename !== changedFilename) {
+              Logger.log(`Filename mismatch detected. Buffer: "${changedFilename}", Actual: "${actualFilename}"`);
+              setScriptEditFlag(true);
+              sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('ChangedFilename') + 1).setValue(actualFilename);
+              Logger.log(`Updated buffer sheet with correct filename: ${actualFilename}`);
+              // Update the local variable to use the correct filename for subsequent operations
+              changedFilename = actualFilename;
+            }
+            
             const fileDate = file.getDateCreated();
             const financialYear = calculateFinancialYear(fileDate);
+            const month = getMonthFromDate(fileDate);
             const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
             const bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Deleted");
 
-            // UI will be handled by logFileToMainSheet function which gets it from buffer sheet
-            
-            // Move from Buffer/Active to Buffer/Deleted
-            moveFileWithDriveApi(file.getId(), bufferDeletedFolder.getId(), bufferActiveFolder.getId());
+            Logger.log(`=== DELETE OPERATION STARTED for ${changedFilename} ===`);
+            Logger.log(`File date: ${fileDate}, Financial Year: ${financialYear}, Month: ${month}`);
+            Logger.log(`Buffer Active folder: ${bufferActiveFolder.getName()} (ID: ${bufferActiveFolder.getId()})`);
+            Logger.log(`Buffer Deleted folder: ${bufferDeletedFolder.getName()} (ID: ${bufferDeletedFolder.getId()})`);
 
-            // Move files from inflow/outflow folders to Buffer/Deleted folder
+            // Debug: Check current file locations
+            debugFileFinding(companyName, financialYear, changedFilename);
+
+            // Use AI to determine inflow/outflow status for proper folder targeting
             const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
             const invoiceStatus = aiResult.invoiceStatus || "unknown";
+            Logger.log(`AI determined invoice status: ${invoiceStatus}`);
+            
+            // 1. First, find and move files from inflow/outflow folders to Buffer/Deleted
             if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
-              const month = getMonthFromDate(fileDate);
-              const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
-              const filesInFlow = flowFolder.getFilesByName(changedFilename);
-              while (filesInFlow.hasNext()) {
-                const flowFile = filesInFlow.next();
-                // Move the file from inflow/outflow to Buffer/Deleted folder
-                moveFileWithDriveApi(flowFile.getId(), bufferDeletedFolder.getId(), flowFolder.getId());
-                Logger.log(`Moved file ${changedFilename} from ${invoiceStatus} folder to Buffer/Deleted folder.`);
+              try {
+                const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+                Logger.log(`Looking for files in ${invoiceStatus} folder: ${flowFolder.getName()}`);
+                
+                const filesInFlow = flowFolder.getFilesByName(changedFilename);
+                let filesMovedFromFlow = 0;
+                
+                while (filesInFlow.hasNext()) {
+                  const flowFile = filesInFlow.next();
+                  try {
+                    Logger.log(`Found file in ${invoiceStatus} folder: ${flowFile.getName()} (ID: ${flowFile.getId()})`);
+                    // Move the file from inflow/outflow to Buffer/Deleted folder
+                    moveFileWithDriveApp(flowFile.getId(), bufferDeletedFolder.getId(), flowFolder.getId());
+                    Logger.log(`Successfully moved file ${changedFilename} from ${invoiceStatus} folder to Buffer/Deleted folder.`);
+                    filesMovedFromFlow++;
+                  } catch (moveError) {
+                    Logger.log(`Error moving file from ${invoiceStatus} folder: ${moveError.toString()}`);
+                    // Continue with other operations even if this fails
+                  }
+                }
+                
+                if (filesMovedFromFlow === 0) {
+                  Logger.log(`No files found to move from ${invoiceStatus} folder for filename: ${changedFilename}`);
+                }
+              } catch (flowFolderError) {
+                Logger.log(`Error accessing ${invoiceStatus} folder: ${flowFolderError.toString()}`);
               }
             }
+            
+            // 2. Move the main file from Buffer/Active to Buffer/Deleted
+            try {
+              Logger.log(`Moving main file ${changedFilename} from Buffer/Active to Buffer/Deleted`);
+              moveFileWithDriveApp(file.getId(), bufferDeletedFolder.getId(), bufferActiveFolder.getId());
+              Logger.log(`Successfully moved main file ${changedFilename} from Buffer/Active to Buffer/Deleted.`);
+            } catch (moveError) {
+              Logger.log(`Error moving main file to Buffer/Deleted: ${moveError.toString()}`);
+              throw moveError; // Re-throw to trigger the catch block below
+            }
 
-            // Remove log entries
+            // 3. Remove log entries from all relevant sheets
             deleteLogEntries(mainSheet, driveFileId, gmailMessageId);
             deleteLogEntries(inflowSheet, driveFileId, gmailMessageId);
             deleteLogEntries(outflowSheet, driveFileId, gmailMessageId);
+            Logger.log(`Removed log entries for file ${changedFilename} from all sheets.`);
 
-            // Mark the Drive File ID in the buffer sheet as 'DELETED'
+            // 4. Update buffer sheet - mark as DELETED and set background color
             setScriptEditFlag(true);
-            sheet.getRange(editedRow, 4).setValue('DELETED');
-            sheet.getRange(editedRow, 6).setValue(reasonText);
-            sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFD966');
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Drive File ID') + 1).setValue('DELETED');
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(reasonText);
+            sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FFD966'); // Orange for deleted
+            
+            Logger.log(`=== DELETE OPERATION COMPLETED SUCCESSFULLY for ${changedFilename} ===`);
+            
           } catch (e) {
-            Logger.log(`Error moving file to buffer: ${e.toString()}`);
-            ui.alert('Error', `Failed to move file "${changedFilename}" to buffer: ${e.message}`, ui.ButtonSet.OK);
+            Logger.log(`=== DELETE OPERATION FAILED for ${changedFilename}: ${e.toString()} ===`);
+            ui.alert('Error', `Failed to delete file "${changedFilename}": ${e.message}`, ui.ButtonSet.OK);
             setScriptEditFlag(true);
             sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Active');
+          }
+        } else {
+          Logger.log(`No valid Drive File ID found for ${changedFilename}. Attempting file recovery...`);
+          
+          // Try to find the file using recovery function even without a file ID
+          const recoveryResult = findAndRecoverFile(companyName, changedFilename, '');
+          
+          if (recoveryResult.file) {
+            Logger.log(`File recovered without file ID: ${recoveryResult.file.getName()} in ${recoveryResult.foundIn}`);
+            
+            // Update buffer sheet with found file ID and retry the delete operation
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Drive File ID') + 1).setValue(recoveryResult.file.getId());
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(`${reasonText} (File ID recovered automatically)`);
+            
+            ui.alert('Success', `File "${changedFilename}" was found and its ID has been updated. Please try the delete operation again.`, ui.ButtonSet.OK);
+            
+            // Revert status to allow user to try again
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue('Active');
+          } else {
+            Logger.log(`File ${changedFilename} not found anywhere. Marking as permanently missing.`);
+            
+            setScriptEditFlag(true);
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Drive File ID') + 1).setValue('NOT_FOUND');
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(`${reasonText} (File not found in any location)`);
+            sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground('#FF9999'); // Light red for missing
+            
+            // Still remove any existing log entries since the file is gone
+            deleteLogEntries(mainSheet, driveFileId || '', gmailMessageId);
+            deleteLogEntries(inflowSheet, driveFileId || '', gmailMessageId);
+            deleteLogEntries(outflowSheet, driveFileId || '', gmailMessageId);
           }
         }
       } else {
@@ -2510,112 +3244,143 @@ function onEdit(e) {
         setScriptEditFlag(true);
         sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(reasonText);
 
-        if (driveFileId && driveFileId !== 'DELETED') {
-          try {
-            // First check if the file is in Buffer/Deleted folder
-            let file = null;
-            let fileDate = null;
-            let financialYear = null;
-            let bufferActiveFolder = null;
-            let bufferDeletedFolder = null;
-            
-            // Try to find file in buffer deleted folder first
-            const currentFinancialYear = calculateFinancialYear(new Date());
-            bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, currentFinancialYear, "Deleted");
-            const filesInDeleted = bufferDeletedFolder.getFilesByName(changedFilename);
-            
-            if (filesInDeleted.hasNext()) {
-              // File found in deleted folder
-              file = filesInDeleted.next();
-              fileDate = file.getDateCreated();
-              financialYear = calculateFinancialYear(fileDate);
-              bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
-              bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Deleted");
-              
-              // UI will be handled by logFileToMainSheet function which gets it from buffer sheet
-              
-              // Move from Buffer/Deleted to Buffer/Active
-              moveFileWithDriveApi(file.getId(), bufferActiveFolder.getId(), bufferDeletedFolder.getId());
+        // Handle both DELETED files and existing files
+        let file = null;
+        let fileDate = null;
+        let financialYear = null;
+        let isRestoredFromDeleted = false;
 
-              // Determine if the file should be moved to inflow/outflow
-              const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
-              const invoiceStatus = aiResult.invoiceStatus || "unknown";
-              const emailSubject = getEmailSubjectForMessageId(gmailMessageId);
-              
-              if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
-                const month = getMonthFromDate(fileDate);
-                const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
-
-                // Copy from Buffer/Active to the appropriate inflow/outflow folder
-                const copiedFile = file.makeCopy(changedFilename, flowFolder);
-                Logger.log(`Copied file ${changedFilename} from Buffer/Active to ${invoiceStatus} folder.`);
-
-                // Log in main and inflow/outflow sheets
-                logFileToMainSheet(mainSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName);
-                const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
-                logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName);
-              }
-              
-              // Update the driveFileId in the buffer sheet
-              setScriptEditFlag(true);
-              sheet.getRange(editedRow, 4).setValue(file.getId());
-            } else {
-              // File not in deleted folder, try to get by ID
-              try {
-                file = DriveApp.getFileById(driveFileId);
-                fileDate = file.getDateCreated();
-                financialYear = calculateFinancialYear(fileDate);
-                bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
-                
-                // UI will be handled by logFileToMainSheet function which gets it from buffer sheet
-                
-                // Use AI to determine inflow/outflow/unknown
-                const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
-                const invoiceStatus = aiResult.invoiceStatus || "unknown";
-                const emailSubject = getEmailSubjectForMessageId(gmailMessageId);
-
-                // Copy to inflow/outflow folders if applicable
-                if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
-                  const month = getMonthFromDate(fileDate);
-                  const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
-                  
-                  const copiedFile = file.makeCopy(changedFilename, flowFolder);
-                  Logger.log(`Copied file ${changedFilename} from Buffer/Active to ${invoiceStatus} folder.`);
-
-                  // Log in main and inflow/outflow sheets
-                  logFileToMainSheet(mainSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName);
-                  const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
-                  logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName);
-                } else {
-                  // Log in main sheet only
-                  logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus, companyName);
-                }
-              } catch (fileNotFoundError) {
-                Logger.log(`File with ID ${driveFileId} not found. Cannot activate.`);
-                ui.alert('Error', `File not found. Cannot activate "${changedFilename}".`, ui.ButtonSet.OK);
-                setScriptEditFlag(true);
-                sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
-                return;
-              }
-            }
-
-            // Clear any previous "Reason" or yellow background if successfully processed as Active
-            setScriptEditFlag(true);
-            sheet.getRange(editedRow, 6).setValue(reasonText);
-            sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground(null);
-            
-            // Update Drive File ID in buffer sheet if it was 'DELETED'
-            if (sheet.getRange(editedRow, 4).getValue() === 'DELETED') {
-              setScriptEditFlag(true);
-              sheet.getRange(editedRow, 4).setValue(file.getId());
-            }
-          } catch (e) {
-            Logger.log(`Error activating file: ${e.toString()}`);
-            ui.alert('Error', `Failed to activate file "${changedFilename}": ${e.message}`, ui.ButtonSet.OK);
-            setScriptEditFlag(true);
-            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
-            return;
+        try {
+          Logger.log(`=== ACTIVATE OPERATION STARTED for ${changedFilename} ===`);
+          Logger.log(`Drive File ID: ${driveFileId}, Old Status: ${oldStatus}`);
+          
+          // Use the robust file recovery function to find the file
+          const recoveryResult = findAndRecoverFile(companyName, changedFilename, driveFileId);
+          
+          if (!recoveryResult.file) {
+            throw new Error(`File "${changedFilename}" not found in any location. It may have been permanently deleted.`);
           }
+          
+          file = recoveryResult.file;
+          fileDate = file.getDateCreated();
+          financialYear = recoveryResult.financialYear || calculateFinancialYear(fileDate);
+          
+          // Determine if this is a restoration from deleted folder
+          isRestoredFromDeleted = (recoveryResult.location === 'buffer_deleted');
+          
+                     Logger.log(`File recovery successful: Found "${file.getName()}" in ${recoveryResult.foundIn}`);
+           Logger.log(`File will be restored from deleted: ${isRestoredFromDeleted}`);
+           
+           // Update the buffer sheet with the correct file ID if it was recovered
+           if (recoveryResult.foundIn !== 'current_id') {
+             setScriptEditFlag(true);
+             sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Drive File ID') + 1).setValue(file.getId());
+             Logger.log(`Updated buffer sheet with recovered file ID: ${file.getId()}`);
+           }
+           
+           // If the actual filename is different from what's in the buffer sheet, update it
+           const actualFilename = file.getName();
+           if (actualFilename !== changedFilename) {
+             Logger.log(`Filename mismatch detected during activation. Buffer: "${changedFilename}", Actual: "${actualFilename}"`);
+             setScriptEditFlag(true);
+             sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('ChangedFilename') + 1).setValue(actualFilename);
+             Logger.log(`Updated buffer sheet with correct filename: ${actualFilename}`);
+             // Update the local variable to use the correct filename for subsequent operations
+             changedFilename = actualFilename;
+           }
+
+           const month = getMonthFromDate(fileDate);
+           const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
+           const bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, financialYear, "Deleted");
+          
+                     // 1. Move file from Buffer/Deleted to Buffer/Active (if it was in deleted)
+           if (isRestoredFromDeleted) {
+             try {
+               Logger.log(`Moving file ${changedFilename} from Buffer/Deleted to Buffer/Active`);
+               moveFileWithDriveApp(file.getId(), bufferActiveFolder.getId(), bufferDeletedFolder.getId());
+               Logger.log(`Successfully moved file ${changedFilename} from Buffer/Deleted to Buffer/Active.`);
+             } catch (moveError) {
+               Logger.log(`Error moving file from deleted to active: ${moveError.toString()}`);
+               throw moveError; // Re-throw to trigger the catch block below
+             }
+           }
+
+          // 2. Use AI to determine inflow/outflow status
+          const aiResult = callGeminiAPIInternal(file.getBlob(), changedFilename);
+          const invoiceStatus = aiResult.invoiceStatus || "unknown";
+          const emailSubject = getEmailSubjectForMessageId(gmailMessageId);
+          
+          // 3. Get UI from buffer sheet for logging
+          const existingUI = sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('UI') + 1).getValue();
+          const uniqueIdentifier = existingUI || generateUniqueIdentifierForFile(file.getId());
+          
+          // 4. Always log to main sheet first
+          // Use invoice date from AI extraction, fallback to file creation date
+          const onEditInvoiceDate = aiResult.date ? new Date(aiResult.date) : fileDate;
+          
+          logFileToMainSheet(mainSheet, file, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
+            date: onEditInvoiceDate.toISOString().split('T')[0],
+            month: getMonthFromDate(onEditInvoiceDate),
+            fy: calculateFinancialYear(onEditInvoiceDate),
+            gst: aiResult.gst || '',
+            tds: aiResult.tds || '',
+            ot: aiResult.ot || '',
+            na: aiResult.na || '',
+            vendorName: aiResult.vendorName || 'Unknown'
+          });
+          
+          // 5. Copy to inflow/outflow folder and log if applicable
+          if (invoiceStatus === "inflow" || invoiceStatus === "outflow") {
+            const flowFolder = createFlowFolderStructure(companyName, financialYear, month, invoiceStatus);
+            
+            // Check if file already exists in flow folder
+            const existingFilesInFlow = flowFolder.getFilesByName(changedFilename);
+            let copiedFile = null;
+            
+            if (existingFilesInFlow.hasNext()) {
+              copiedFile = existingFilesInFlow.next();
+              Logger.log(`File ${changedFilename} already exists in ${invoiceStatus} folder.`);
+            } else {
+              copiedFile = file.makeCopy(changedFilename, flowFolder);
+              Logger.log(`Copied file ${changedFilename} to ${invoiceStatus} folder.`);
+            }
+
+            // Log to inflow/outflow sheet
+            const flowSheet = (invoiceStatus === "inflow") ? inflowSheet : outflowSheet;
+            // Use invoice date from AI extraction, fallback to file creation date
+            const onEditFlowInvoiceDate = aiResult.date ? new Date(aiResult.date) : fileDate;
+            
+            logFileToMainSheet(flowSheet, copiedFile, emailSubject, gmailMessageId, invoiceStatus, companyName, uniqueIdentifier, {
+              date: onEditFlowInvoiceDate.toISOString().split('T')[0],
+              month: getMonthFromDate(onEditFlowInvoiceDate),
+              fy: calculateFinancialYear(onEditFlowInvoiceDate),
+              gst: aiResult.gst || '',
+              tds: aiResult.tds || '',
+              ot: aiResult.ot || '',
+              na: aiResult.na || '',
+              vendorName: aiResult.vendorName || 'Unknown'
+            });
+          }
+          
+          // 6. Update buffer sheet
+          setScriptEditFlag(true);
+          sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Drive File ID') + 1).setValue(file.getId());
+          sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Reason') + 1).setValue(reasonText);
+          sheet.getRange(editedRow, 1, 1, BUFFER_SHEET_HEADERS.length).setBackground(null); // Remove background color
+          
+          // Update UI if it was missing
+          if (!existingUI) {
+            sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('UI') + 1).setValue(uniqueIdentifier);
+          }
+          
+          Logger.log(`=== ACTIVATE OPERATION COMPLETED SUCCESSFULLY for ${changedFilename} ===`);
+          
+        } catch (e) {
+          Logger.log(`=== ACTIVATE OPERATION FAILED for ${changedFilename}: ${e.toString()} ===`);
+          ui.alert('Error', `Failed to activate file "${changedFilename}": ${e.message}`, ui.ButtonSet.OK);
+          setScriptEditFlag(true);
+          sheet.getRange(editedRow, BUFFER_SHEET_HEADERS.indexOf('Status') + 1).setValue(oldStatus || 'Delete');
+          return;
         }
       } else {
         setScriptEditFlag(true);
@@ -2639,26 +3404,136 @@ function shouldShowPrompt() {
 }
 
 /**
- * Moves a file from one folder to another using the Drive API (UrlFetchApp).
+ * Moves a file from one folder to another using Google Apps Script DriveApp.
+ * This is more reliable than using the REST API directly.
+ * @param {string} fileId - The ID of the file to move.
+ * @param {string} addParentId - The folder ID to add as parent.
+ * @param {string} removeParentId - The folder ID to remove as parent (optional).
+ */
+function moveFileWithDriveApp(fileId, addParentId, removeParentId = null) {
+  try {
+    // Validate inputs
+    if (!fileId || fileId.trim() === '') {
+      throw new Error('File ID is required and cannot be empty');
+    }
+    if (!addParentId || addParentId.trim() === '') {
+      throw new Error('Target folder ID is required and cannot be empty');
+    }
+    
+    Logger.log(`Attempting to move file with ID: ${fileId}`);
+    Logger.log(`Target folder ID: ${addParentId}`);
+    Logger.log(`Source folder ID: ${removeParentId || 'Not specified'}`);
+    
+    // Get the file with better error handling
+    let file;
+    try {
+      file = DriveApp.getFileById(fileId.trim());
+      Logger.log(`Successfully retrieved file: ${file.getName()}`);
+    } catch (fileError) {
+      Logger.log(`Failed to retrieve file by ID ${fileId}: ${fileError.toString()}`);
+      throw new Error(`File with ID ${fileId} not found or not accessible. It may have been moved or deleted.`);
+    }
+    
+    // Get the target folder
+    let targetFolder;
+    try {
+      targetFolder = DriveApp.getFolderById(addParentId.trim());
+      Logger.log(`Target folder: ${targetFolder.getName()}`);
+    } catch (folderError) {
+      Logger.log(`Failed to retrieve target folder by ID ${addParentId}: ${folderError.toString()}`);
+      throw new Error(`Target folder with ID ${addParentId} not found or not accessible.`);
+    }
+    
+    Logger.log(`Moving file "${file.getName()}" to folder "${targetFolder.getName()}"`);
+    
+    // Check if file is already in the target folder
+    const currentParents = file.getParents();
+    let alreadyInTarget = false;
+    while (currentParents.hasNext()) {
+      const parent = currentParents.next();
+      if (parent.getId() === addParentId.trim()) {
+        alreadyInTarget = true;
+        Logger.log(`File is already in target folder: ${parent.getName()}`);
+        break;
+      }
+    }
+    
+    // Remove from current parents if specified
+    if (removeParentId && removeParentId.trim() !== '') {
+      try {
+        const sourceFolder = DriveApp.getFolderById(removeParentId.trim());
+        
+        // Check if file is actually in this source folder
+        const filesInSource = sourceFolder.getFilesByName(file.getName());
+        let fileFoundInSource = false;
+        while (filesInSource.hasNext()) {
+          const fileInSource = filesInSource.next();
+          if (fileInSource.getId() === file.getId()) {
+            fileFoundInSource = true;
+            break;
+          }
+        }
+        
+        if (fileFoundInSource) {
+          sourceFolder.removeFile(file);
+          Logger.log(`Removed file from source folder: ${sourceFolder.getName()}`);
+        } else {
+          Logger.log(`File not found in specified source folder: ${sourceFolder.getName()}`);
+        }
+      } catch (removeError) {
+        Logger.log(`Warning: Could not remove file from source folder ${removeParentId}: ${removeError.toString()}`);
+        // Continue with adding to new folder even if removal fails
+      }
+    } else {
+      // Remove from all current parents except target
+      const parents = file.getParents();
+      const parentsToRemove = [];
+      
+      while (parents.hasNext()) {
+        const parent = parents.next();
+        if (parent.getId() !== addParentId.trim()) {
+          parentsToRemove.push(parent);
+        }
+      }
+      
+      for (const parent of parentsToRemove) {
+        try {
+          parent.removeFile(file);
+          Logger.log(`Removed file from parent folder: ${parent.getName()}`);
+        } catch (removeError) {
+          Logger.log(`Warning: Could not remove file from parent folder ${parent.getName()}: ${removeError.toString()}`);
+        }
+      }
+    }
+    
+    // Add to new parent if not already there
+    if (!alreadyInTarget) {
+      try {
+        targetFolder.addFile(file);
+        Logger.log(`Successfully added file to target folder: ${targetFolder.getName()}`);
+      } catch (addError) {
+        Logger.log(`Error adding file to target folder: ${addError.toString()}`);
+        throw new Error(`Failed to add file to target folder: ${addError.message}`);
+      }
+    }
+    
+    Logger.log(`File move operation completed successfully`);
+    return { success: true, fileId: fileId, fileName: file.getName() };
+    
+  } catch (error) {
+    Logger.log(`Error in moveFileWithDriveApp: ${error.toString()}`);
+    throw new Error(`Failed to move file: ${error.message}`);
+  }
+}
+
+/**
+ * Legacy function for backward compatibility - redirects to new implementation
  * @param {string} fileId - The ID of the file to move.
  * @param {string} addParentId - The folder ID to add as parent.
  * @param {string} removeParentId - The folder ID to remove as parent.
  */
 function moveFileWithDriveApi(fileId, addParentId, removeParentId) {
-  var token = ScriptApp.getOAuthToken();
-  var url = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?addParents=' + addParentId + '&removeParents=' + removeParentId + '&fields=id,parents';
-  var options = {
-    method: 'patch',
-    muteHttpExceptions: true,
-    headers: {
-      Authorization: 'Bearer ' + token
-    }
-  };
-  var response = UrlFetchApp.fetch(url, options);
-  if (response.getResponseCode() !== 200) {
-    throw new Error('Failed to move file: ' + response.getContentText());
-  }
-  return JSON.parse(response.getContentText());
+  return moveFileWithDriveApp(fileId, addParentId, removeParentId);
 }
 
 /**
@@ -2671,6 +3546,430 @@ function moveFileWithDriveApi(fileId, addParentId, removeParentId) {
 function getOrCreateBufferSubfolder(companyName, financialYear, subfolderName) {
   const bufferFolder = createBufferFolderStructure(companyName, financialYear);
   return getOrCreateFolder(bufferFolder, subfolderName); // "Active" or "Deleted"
+}
+
+/**
+ * Enhanced file finder that searches across multiple possible locations
+ * @param {string} filename - The filename to search for
+ * @param {Array<GoogleAppsScript.Drive.DriveFolder>} foldersToSearch - Array of folders to search in
+ * @returns {Array<GoogleAppsScript.Drive.File>} Array of found files
+ */
+function findFilesInFolders(filename, foldersToSearch) {
+  const foundFiles = [];
+  
+  for (const folder of foldersToSearch) {
+    try {
+      const filesInFolder = folder.getFilesByName(filename);
+      while (filesInFolder.hasNext()) {
+        const file = filesInFolder.next();
+        foundFiles.push(file);
+        Logger.log(`Found file "${filename}" in folder: ${folder.getName()} (ID: ${file.getId()})`);
+      }
+    } catch (folderError) {
+      Logger.log(`Error searching in folder ${folder.getName()}: ${folderError.toString()}`);
+    }
+  }
+  
+  return foundFiles;
+}
+
+/**
+ * Attempts to find and recover the correct file ID for a given filename
+ * Enhanced to handle data inconsistencies where buffer sheet might have wrong filename
+ * @param {string} companyName - Company name
+ * @param {string} changedFilename - The filename to search for
+ * @param {string} currentFileId - The current file ID (may be invalid)
+ * @returns {Object} Object containing found file and its location info
+ */
+function findAndRecoverFile(companyName, changedFilename, currentFileId) {
+  Logger.log(`=== ATTEMPTING FILE RECOVERY for "${changedFilename}" ===`);
+  Logger.log(`Current file ID: ${currentFileId}`);
+  
+  // Load existing company folder mappings from script properties
+  loadCompanyFolderMappings();
+
+  // Ensure company folder exists (create if needed)
+  if (!ATTACHMENT_COMPANY_FOLDER_MAP[companyName]) {
+    Logger.log(`Company '${companyName}' not found in folder mapping. Creating new folder structure...`);
+    
+    try {
+      const newCompanyFolderId = createCompanyFolderStructure(companyName);
+      Logger.log(`Successfully created company folder structure for '${companyName}' with ID: ${newCompanyFolderId}`);
+    } catch (createError) {
+      Logger.log(`Error: Failed to create folder structure for company '${companyName}': ${createError.message}`);
+      return {
+        file: null,
+        fileId: null,
+        location: null,
+        financialYear: null,
+        foundIn: null
+      };
+    }
+  }
+  
+  const result = {
+    file: null,
+    fileId: null,
+    location: null,
+    financialYear: null,
+    foundIn: null
+  };
+  
+  try {
+    // First, try the current file ID if it exists and looks valid
+    if (currentFileId && currentFileId !== 'DELETED' && currentFileId.trim() !== '') {
+      try {
+        const file = DriveApp.getFileById(currentFileId.trim());
+        // Accept the file even if the name doesn't match exactly (data inconsistency handling)
+        result.file = file;
+        result.fileId = file.getId();
+        result.foundIn = 'current_id';
+        Logger.log(`File found using current ID: ${file.getName()} (searched for: ${changedFilename})`);
+        return result;
+      } catch (idError) {
+        Logger.log(`Current file ID ${currentFileId} is invalid: ${idError.toString()}`);
+      }
+    }
+    
+    // Search across multiple financial years
+    const currentFinancialYear = calculateFinancialYear(new Date());
+    const years = [currentFinancialYear];
+    
+    // Add previous and next financial years
+    const currentYearNum = parseInt(currentFinancialYear.split('-')[1]);
+    years.push(`FY-${(currentYearNum - 1).toString().padStart(2, '0')}-${currentYearNum.toString().padStart(2, '0')}`);
+    years.push(`FY-${currentYearNum.toString().padStart(2, '0')}-${(currentYearNum + 1).toString().padStart(2, '0')}`);
+    
+    // Search in Buffer/Active folders
+    for (const year of years) {
+      try {
+        const bufferActiveFolder = getOrCreateBufferSubfolder(companyName, year, "Active");
+        
+        // First try exact filename match
+        const files = bufferActiveFolder.getFilesByName(changedFilename);
+        if (files.hasNext()) {
+          const file = files.next();
+          result.file = file;
+          result.fileId = file.getId();
+          result.financialYear = year;
+          result.location = 'buffer_active';
+          result.foundIn = `buffer_active_${year}`;
+          Logger.log(`File found in Buffer/Active for ${year}: ${file.getId()}`);
+          return result;
+        }
+        
+        // If exact match fails and changedFilename looks like an original filename,
+        // try to find files with AI-generated patterns
+        if (isOriginalFilenameFormat(changedFilename)) {
+          Logger.log(`Searching for AI-generated filename alternatives for: ${changedFilename}`);
+          const allFiles = bufferActiveFolder.getFiles();
+          while (allFiles.hasNext()) {
+            const file = allFiles.next();
+            const fileName = file.getName();
+            // Look for files with AI-generated pattern (YYYY-MM-DD_Vendor_Invoice_Amount.ext)
+            if (isAIGeneratedFilenameFormat(fileName)) {
+              Logger.log(`Found potential AI-generated file: ${fileName}`);
+              result.file = file;
+              result.fileId = file.getId();
+              result.financialYear = year;
+              result.location = 'buffer_active';
+              result.foundIn = `buffer_active_${year}_pattern_match`;
+              Logger.log(`File found by pattern matching in Buffer/Active for ${year}: ${file.getId()}`);
+              return result;
+            }
+          }
+        }
+        
+      } catch (yearError) {
+        Logger.log(`Error checking Buffer/Active for ${year}: ${yearError.toString()}`);
+      }
+    }
+    
+    // Search in Buffer/Deleted folders
+    for (const year of years) {
+      try {
+        const bufferDeletedFolder = getOrCreateBufferSubfolder(companyName, year, "Deleted");
+        
+        // First try exact filename match
+        const files = bufferDeletedFolder.getFilesByName(changedFilename);
+        if (files.hasNext()) {
+          const file = files.next();
+          result.file = file;
+          result.fileId = file.getId();
+          result.financialYear = year;
+          result.location = 'buffer_deleted';
+          result.foundIn = `buffer_deleted_${year}`;
+          Logger.log(`File found in Buffer/Deleted for ${year}: ${file.getId()}`);
+          return result;
+        }
+        
+        // If exact match fails and changedFilename looks like an original filename,
+        // try to find files with AI-generated patterns
+        if (isOriginalFilenameFormat(changedFilename)) {
+          Logger.log(`Searching for AI-generated filename alternatives in Deleted for: ${changedFilename}`);
+          const allFiles = bufferDeletedFolder.getFiles();
+          while (allFiles.hasNext()) {
+            const file = allFiles.next();
+            const fileName = file.getName();
+            // Look for files with AI-generated pattern (YYYY-MM-DD_Vendor_Invoice_Amount.ext)
+            if (isAIGeneratedFilenameFormat(fileName)) {
+              Logger.log(`Found potential AI-generated file in Deleted: ${fileName}`);
+              result.file = file;
+              result.fileId = file.getId();
+              result.financialYear = year;
+              result.location = 'buffer_deleted';
+              result.foundIn = `buffer_deleted_${year}_pattern_match`;
+              Logger.log(`File found by pattern matching in Buffer/Deleted for ${year}: ${file.getId()}`);
+              return result;
+            }
+          }
+        }
+        
+      } catch (yearError) {
+        Logger.log(`Error checking Buffer/Deleted for ${year}: ${yearError.toString()}`);
+      }
+    }
+    
+    // Search in inflow/outflow folders
+    for (const year of years) {
+      try {
+        const currentDate = new Date();
+        const month = getMonthFromDate(currentDate);
+        
+        ['inflow', 'outflow'].forEach(flowType => {
+          try {
+            const flowFolder = createFlowFolderStructure(companyName, year, month, flowType);
+            const files = flowFolder.getFilesByName(changedFilename);
+            
+            if (files.hasNext()) {
+              const file = files.next();
+              result.file = file;
+              result.fileId = file.getId();
+              result.financialYear = year;
+              result.location = flowType;
+              result.foundIn = `${flowType}_${year}_${month}`;
+              Logger.log(`File found in ${flowType} for ${year}/${month}: ${file.getId()}`);
+              return result;
+            }
+          } catch (flowError) {
+            Logger.log(`Error checking ${flowType} for ${year}: ${flowError.toString()}`);
+          }
+        });
+      } catch (yearError) {
+        Logger.log(`Error checking flow folders for ${year}: ${yearError.toString()}`);
+      }
+    }
+    
+    Logger.log(`File "${changedFilename}" not found in any location`);
+    return result;
+    
+  } catch (error) {
+    Logger.log(`Error in findAndRecoverFile: ${error.toString()}`);
+    return result;
+  }
+}
+
+/**
+ * Debug function to log folder structure and file locations
+ * @param {string} companyName - Company name
+ * @param {string} financialYear - Financial year
+ * @param {string} filename - Filename to search for
+ */
+function debugFileFinding(companyName, financialYear, filename) {
+  Logger.log(`=== DEBUG: Searching for file "${filename}" in ${companyName} ${financialYear} ===`);
+  
+  try {
+    // Check Buffer/Active
+    const bufferActive = getOrCreateBufferSubfolder(companyName, financialYear, "Active");
+    Logger.log(`Buffer/Active folder: ${bufferActive.getName()} (ID: ${bufferActive.getId()})`);
+    const activeFiles = bufferActive.getFilesByName(filename);
+    let activeCount = 0;
+    while (activeFiles.hasNext()) {
+      activeFiles.next();
+      activeCount++;
+    }
+    Logger.log(`Files in Buffer/Active: ${activeCount}`);
+    
+    // Check Buffer/Deleted
+    const bufferDeleted = getOrCreateBufferSubfolder(companyName, financialYear, "Deleted");
+    Logger.log(`Buffer/Deleted folder: ${bufferDeleted.getName()} (ID: ${bufferDeleted.getId()})`);
+    const deletedFiles = bufferDeleted.getFilesByName(filename);
+    let deletedCount = 0;
+    while (deletedFiles.hasNext()) {
+      deletedFiles.next();
+      deletedCount++;
+    }
+    Logger.log(`Files in Buffer/Deleted: ${deletedCount}`);
+    
+    // Check inflow/outflow folders
+    const currentDate = new Date();
+    const month = getMonthFromDate(currentDate);
+    
+    ['inflow', 'outflow'].forEach(flowType => {
+      try {
+        const flowFolder = createFlowFolderStructure(companyName, financialYear, month, flowType);
+        Logger.log(`${flowType} folder: ${flowFolder.getName()} (ID: ${flowFolder.getId()})`);
+        const flowFiles = flowFolder.getFilesByName(filename);
+        let flowCount = 0;
+        while (flowFiles.hasNext()) {
+          flowFiles.next();
+          flowCount++;
+        }
+        Logger.log(`Files in ${flowType}: ${flowCount}`);
+      } catch (flowError) {
+        Logger.log(`Error checking ${flowType} folder: ${flowError.toString()}`);
+      }
+    });
+    
+  } catch (debugError) {
+    Logger.log(`Debug error: ${debugError.toString()}`);
+  }
+  
+  Logger.log(`=== END DEBUG ===`);
+}
+
+/**
+ * SUPPLEMENTARY THREAD RECOGNITION FUNCTIONS
+ * These functions add thread context without modifying existing functionality
+ */
+
+/**
+ * Analyzes Gmail thread to extract sender and conversation context (supplementary)
+ * @param {GoogleAppsScript.Gmail.GmailThread} thread - Gmail thread object
+ * @returns {Object} Thread analysis with sender info and context
+ */
+function getThreadContext(thread) {
+  try {
+    const messages = thread.getMessages();
+    const threadId = thread.getId();
+    const firstMessage = messages[0];
+    
+    // Extract sender information
+    const primarySender = firstMessage.getFrom();
+    const senders = new Set();
+    let totalAttachments = 0;
+    
+    // Analyze all messages in thread
+    messages.forEach(message => {
+      senders.add(message.getFrom());
+      totalAttachments += message.getAttachments().filter(a => !a.isGoogleType() && !a.getName().startsWith('ATT')).length;
+    });
+    
+    // Extract sender details
+    const senderEmail = primarySender.match(/<(.+?)>/)?.[1] || primarySender;
+    const senderName = primarySender.replace(/<.+?>/, '').trim().replace(/['"]/g, '');
+    
+    // Create thread context (supplementary information)
+    return {
+      threadId: threadId,
+      messageCount: messages.length,
+      senderName: senderName,
+      senderEmail: senderEmail,
+      isSingleSender: senders.size === 1,
+      isRecurringConversation: messages.length > 1,
+      totalAttachments: totalAttachments,
+      threadLabel: `${senderName.replace(/\s+/g, '')}_${threadId.substring(0, 6)}`
+    };
+    
+  } catch (error) {
+    Logger.log(`Thread context extraction error: ${error.toString()}`);
+    return {
+      threadId: thread.getId(),
+      messageCount: 0,
+      senderName: 'Unknown',
+      senderEmail: 'unknown@example.com',
+      isSingleSender: false,
+      isRecurringConversation: false,
+      totalAttachments: 0,
+      threadLabel: `Unknown_${thread.getId().substring(0, 6)}`
+    };
+  }
+}
+
+/**
+ * Logs thread context for analysis (supplementary)
+ * @param {string} threadId - Thread ID
+ * @param {Object} context - Thread context
+ * @param {string} status - Processing status
+ */
+function logThreadContext(threadId, context, status) {
+  THREAD_CONTEXT_LOG[threadId] = {
+    ...context,
+    status: status,
+    processedAt: new Date(),
+    attachmentsProcessed: 0,
+    attachmentsSkipped: 0
+  };
+}
+
+/**
+ * Updates thread processing stats (supplementary)
+ * @param {string} threadId - Thread ID
+ * @param {string} action - Action type
+ */
+function updateThreadStats(threadId, action) {
+  if (THREAD_CONTEXT_LOG[threadId]) {
+    if (action === 'processed') {
+      THREAD_CONTEXT_LOG[threadId].attachmentsProcessed++;
+    } else if (action === 'skipped') {
+      THREAD_CONTEXT_LOG[threadId].attachmentsSkipped++;
+    }
+  }
+}
+
+/**
+ * Gets thread summary for logging (supplementary)
+ * @returns {Object} Thread processing summary
+ */
+function getThreadSummary() {
+  const threads = Object.values(THREAD_CONTEXT_LOG);
+  const singleSenderThreads = threads.filter(t => t.isSingleSender);
+  const recurringConversations = threads.filter(t => t.isRecurringConversation);
+  
+  return {
+    totalThreads: threads.length,
+    singleSenderThreads: singleSenderThreads.length,
+    recurringConversations: recurringConversations.length,
+    topSenders: threads.map(t => ({ name: t.senderName, emails: t.messageCount, attachments: t.totalAttachments }))
+      .sort((a, b) => b.attachments - a.attachments)
+      .slice(0, 5)
+  };
+}
+
+/**
+ * Checks if a filename appears to be in original format (not AI-generated)
+ * @param {string} filename - The filename to check
+ * @returns {boolean} True if it looks like an original filename
+ */
+function isOriginalFilenameFormat(filename) {
+  if (!filename) return false;
+  
+  // AI-generated filenames follow pattern: YYYY-MM-DD_Vendor_Invoice_Amount.ext
+  // Original filenames typically don't follow this strict pattern
+  const aiPattern = /^\d{4}-\d{2}-\d{2}_[^_]+_[^_]+_[\d,.]+\.[a-zA-Z]+$/;
+  
+  // If it matches AI pattern, it's NOT an original filename
+  if (aiPattern.test(filename)) {
+    return false;
+  }
+  
+  // If it has spaces, mixed case, or doesn't follow the strict AI pattern, 
+  // it's likely an original filename
+  return true;
+}
+
+/**
+ * Checks if a filename appears to be AI-generated
+ * @param {string} filename - The filename to check  
+ * @returns {boolean} True if it looks like an AI-generated filename
+ */
+function isAIGeneratedFilenameFormat(filename) {
+  if (!filename) return false;
+  
+  // AI-generated filenames follow pattern: YYYY-MM-DD_Vendor_Invoice_Amount.ext
+  const aiPattern = /^\d{4}-\d{2}-\d{2}_[^_]+_[^_]+_[\d,.]+\.[a-zA-Z]+$/;
+  
+  return aiPattern.test(filename);
 }
 
 /**
@@ -2742,6 +4041,116 @@ function populateMissingUIValues(companyName) {
   Logger.log(`Completed populating missing UI values for company: ${companyName}`);
 }
 
+/**
+ * Test function to verify AI classification and file renaming is working
+ * Use this to test with a sample file or debug issues
+ * @param {string} testFileName - Name of test file
+ * @returns {Object} Test result with classification and filename generation
+ */
+function testAIClassificationAndRenaming(testFileName = "Sample Invoice.pdf") {
+  Logger.log(`=== TESTING AI CLASSIFICATION AND RENAMING ===`);
+  Logger.log(`Test filename: ${testFileName}`);
+  
+  try {
+    // Test fallback extraction (simulates when AI is not available)
+    const fallbackResult = fallbackDataExtraction(null, testFileName);
+    Logger.log(`\n--- FALLBACK CLASSIFICATION ---`);
+    Logger.log(`Status: ${fallbackResult.invoiceStatus}`);
+    Logger.log(`Document Type: ${fallbackResult.documentType}`);
+    Logger.log(`Vendor: ${fallbackResult.vendorName}`);
+    Logger.log(`Invoice Number: ${fallbackResult.invoiceNumber}`);
+    
+    // Test filename generation
+    const generatedFilename = generateNewFilename(fallbackResult, testFileName);
+    Logger.log(`\n--- FILENAME GENERATION ---`);
+    Logger.log(`Original: ${testFileName}`);
+    Logger.log(`Generated: ${generatedFilename}`);
+    
+    // Test status validation
+    const validatedStatus = validateAndNormalizeInvoiceStatus(fallbackResult.invoiceStatus, fallbackResult.isFinancialDocument);
+    Logger.log(`\n--- STATUS VALIDATION ---`);
+    Logger.log(`Original Status: ${fallbackResult.invoiceStatus}`);
+    Logger.log(`Validated Status: ${validatedStatus}`);
+    Logger.log(`Is Financial: ${fallbackResult.isFinancialDocument}`);
+    
+    // Create summary
+    const summary = {
+      originalFilename: testFileName,
+      generatedFilename: generatedFilename,
+      classification: validatedStatus,
+      vendor: fallbackResult.vendorName,
+      invoiceNumber: fallbackResult.invoiceNumber,
+      amount: fallbackResult.amount,
+      isRenamed: testFileName !== generatedFilename,
+      isClassified: validatedStatus !== 'unknown'
+    };
+    
+    Logger.log(`\n--- TEST SUMMARY ---`);
+    Logger.log(`✓ File will be renamed: ${summary.isRenamed}`);
+    Logger.log(`✓ File will be classified: ${summary.isClassified}`);
+    Logger.log(`✓ Final classification: ${summary.classification}`);
+    Logger.log(`✓ Routing: ${summary.classification === 'irrelevant' || summary.classification === 'unknown' ? 'Buffer2' : 'Main Buffer → ' + summary.classification + ' folder'}`);
+    
+    Logger.log(`=== END TEST ===`);
+    
+    return summary;
+    
+  } catch (error) {
+    Logger.log(`Test failed: ${error.toString()}`);
+    return { error: error.toString() };
+  }
+}
+
+/**
+ * Debugging function to check recent processed files
+ * @param {string} companyName - Company to check
+ */
+function debugRecentFiles(companyName) {
+  Logger.log(`=== DEBUGGING RECENT FILES FOR ${companyName.toUpperCase()} ===`);
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const bufferSheet = ss.getSheetByName(`${companyName}-buffer`);
+  
+  if (!bufferSheet) {
+    Logger.log(`No buffer sheet found for ${companyName}`);
+    return;
+  }
+  
+  const data = bufferSheet.getDataRange().getValues();
+  const headers = data[0];
+  Logger.log(`Buffer sheet headers: ${headers.join(', ')}`);
+  
+  if (data.length <= 1) {
+    Logger.log(`No files processed yet for ${companyName}`);
+    return;
+  }
+  
+  // Show last 5 processed files
+  const recentFiles = data.slice(-5).reverse(); // Last 5, newest first
+  
+  Logger.log(`\n--- RECENT PROCESSED FILES ---`);
+  recentFiles.forEach((row, index) => {
+    const originalFilename = row[1];
+    const changedFilename = row[2];
+    const invoiceId = row[3];
+    const driveFileId = row[4];
+    const reason = row[6];
+    const status = row[7];
+    const ui = row[8];
+    
+    Logger.log(`\n${index + 1}. ${originalFilename}`);
+    Logger.log(`   → Renamed to: ${changedFilename}`);
+    Logger.log(`   → Invoice ID: ${invoiceId}`);
+    Logger.log(`   → Status: ${status}`);
+    Logger.log(`   → UI: ${ui}`);
+    Logger.log(`   → Classification: ${reason}`);
+    Logger.log(`   → File ID: ${driveFileId}`);
+    Logger.log(`   → Renamed: ${originalFilename !== changedFilename ? 'YES' : 'NO'}`);
+  });
+  
+  Logger.log(`=== END DEBUG ===`);
+}
+
 // Helper to set dropdown for 'Relevance' column in Buffer2
 function setRelevanceDropdownValidation(sheet) {
   const relevanceCol = BUFFER2_SHEET_HEADERS.indexOf('Relevance') + 1;
@@ -2757,5 +4166,151 @@ function sortSheetByDateDesc(sheet, dateCol) {
   // Sort range: all rows except header
   sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn())
     .sort({column: dateCol, ascending: false});
+}
+
+/**
+ * Helper function to validate Drive permissions and folder access
+ * @param {string} folderId - Folder ID to test access
+ * @returns {boolean} True if access is available
+ */
+function validateDriveAccess(folderId) {
+  try {
+    if (!folderId || folderId.trim() === '') {
+      Logger.log('Invalid folder ID provided for validation');
+      return false;
+    }
+    
+    // Try to access the folder
+    const folder = DriveApp.getFolderById(folderId);
+    const folderName = folder.getName(); // This will throw if no access
+    Logger.log(`Drive access validated for folder: ${folderName} (ID: ${folderId})`);
+    return true;
+  } catch (error) {
+    Logger.log(`Drive access validation failed for folder ID ${folderId}: ${error.toString()}`);
+    return false;
+  }
+}
+
+/**
+ * Extract company name from changed filename
+ * Changed filenames typically start with company name (e.g., "analogy_2024_invoice.pdf")
+ * @param {string} changedFilename - The AI-generated filename
+ * @returns {string|null} Company name or null if not found
+ */
+function extractCompanyFromFilename(changedFilename) {
+  if (!changedFilename || typeof changedFilename !== 'string') {
+    return null;
+  }
+  
+  // Convert to lowercase for matching
+  const lowerFilename = changedFilename.toLowerCase();
+  
+  // Ensure company mappings are loaded
+  loadCompanyFolderMappings();
+  
+  // Check against known company names in the mapping
+  const knownCompanies = Object.keys(ATTACHMENT_COMPANY_FOLDER_MAP);
+  for (const company of knownCompanies) {
+    if (lowerFilename.startsWith(company.toLowerCase())) {
+      Logger.log(`Found company '${company}' in filename: ${changedFilename}`);
+      return company;
+    }
+  }
+  
+  // Try to extract company name from common patterns
+  // Pattern 1: company_year_document.ext
+  const underscorePattern = changedFilename.split('_')[0];
+  if (underscorePattern && underscorePattern.length > 2) {
+    // Check if this matches any known company
+    for (const company of knownCompanies) {
+      if (underscorePattern.toLowerCase() === company.toLowerCase()) {
+        Logger.log(`Found company '${company}' from underscore pattern in: ${changedFilename}`);
+        return company;
+      }
+    }
+  }
+  
+  // Pattern 2: company-year-document.ext
+  const dashPattern = changedFilename.split('-')[0];
+  if (dashPattern && dashPattern.length > 2) {
+    // Check if this matches any known company
+    for (const company of knownCompanies) {
+      if (dashPattern.toLowerCase() === company.toLowerCase()) {
+        Logger.log(`Found company '${company}' from dash pattern in: ${changedFilename}`);
+        return company;
+      }
+    }
+  }
+  
+  Logger.log(`Could not extract company name from filename: ${changedFilename}`);
+  Logger.log(`Available companies: ${knownCompanies.join(', ')}`);
+  return null;
+}
+
+/**
+ * Get or create company name mapping, with fallback to create new company
+ * @param {string} companyName - Company name to find or create
+ * @returns {string} Valid company name that exists in mappings
+ */
+function getOrCreateCompanyMapping(companyName) {
+  if (!companyName || typeof companyName !== 'string') {
+    return null;
+  }
+  
+  // Ensure company mappings are loaded
+  loadCompanyFolderMappings();
+  
+  // Check if company already exists (case-insensitive)
+  const knownCompanies = Object.keys(ATTACHMENT_COMPANY_FOLDER_MAP);
+  for (const company of knownCompanies) {
+    if (company.toLowerCase() === companyName.toLowerCase()) {
+      Logger.log(`Found existing company mapping: ${company}`);
+      return company;
+    }
+  }
+  
+  // Company doesn't exist, try to create it
+  try {
+    Logger.log(`Creating new company mapping for: ${companyName}`);
+    const newCompanyFolderId = createCompanyFolderStructure(companyName);
+    Logger.log(`Successfully created company folder structure for: ${companyName} with ID: ${newCompanyFolderId}`);
+    return companyName;
+  } catch (createError) {
+    Logger.log(`Failed to create company folder structure for ${companyName}: ${createError.toString()}`);
+    return null;
+  }
+}
+
+/**
+ * Function to test and request Drive permissions
+ * Call this function once to ensure proper permissions are granted
+ */
+function requestDrivePermissions() {
+  try {
+    Logger.log('Testing Drive permissions...');
+    
+    // Test basic Drive access
+    const folders = DriveApp.getFolders();
+    if (folders.hasNext()) {
+      const testFolder = folders.next();
+      Logger.log(`✓ Basic Drive access granted. Test folder: ${testFolder.getName()}`);
+    }
+    
+    // Test creating a temporary folder (will be deleted)
+    const tempFolder = DriveApp.createFolder('TempPermissionTest_' + Date.now());
+    Logger.log(`✓ Drive write access granted. Created temp folder: ${tempFolder.getId()}`);
+    
+    // Clean up
+    DriveApp.getFolderById(tempFolder.getId()).setTrashed(true);
+    Logger.log('✓ Drive permissions test completed successfully');
+    
+    return true;
+  } catch (error) {
+    Logger.log(`✗ Drive permissions test failed: ${error.toString()}`);
+    Logger.log('Please ensure the following permissions are granted:');
+    Logger.log('- https://www.googleapis.com/auth/drive');
+    Logger.log('- https://www.googleapis.com/auth/drive.file');
+    return false;
+  }
 }
   

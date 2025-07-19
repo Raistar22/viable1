@@ -274,66 +274,120 @@ function loadFilesForProcessingGAS(sheetName) {
 * @returns {Object} An object containing extracted AI data and preview data, or an error.
 */
 function processFileWithAIGAS(fileId, originalName, mimeType, fileUrl) {
- console.log(`Starting AI processing for file ID: ${fileId}, Name: "${originalName}", MIME: ${mimeType}`);
- let previewData = { type: 'unsupported', content: 'Preview not available for this file type.' };
- let base64Content = null;
- let ocrText = '';
+  console.log(`Starting AI processing for file ID: ${fileId}, Name: "${originalName}", MIME: ${mimeType}`);
+  let previewData = { type: 'unsupported', content: 'Preview not available for this file type.' };
+  let base64Content = null;
+  let ocrText = '';
 
+  try {
+    // Validate file ID
+    if (!fileId || typeof fileId !== 'string' || fileId.trim() === '') {
+      throw new Error('Invalid file ID provided');
+    }
 
- try {
-   const file = DriveApp.getFileById(fileId);
-   const blob = file.getBlob();
+    // Get the file from Drive
+    const file = DriveApp.getFileById(fileId.trim());
+    if (!file) {
+      throw new Error(`File with ID ${fileId} not found or inaccessible`);
+    }
 
+    // Check if file is trashed
+    if (file.isTrashed()) {
+      throw new Error(`File with ID ${fileId} is in trash`);
+    }
 
-   // OCR for images and PDFs
-   if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
-     ocrText = extractTextWithOCR(fileId);
-   }
+    // Get blob with validation
+    let blob = null;
+    
+    // Handle Google Workspace files (Docs, Sheets, Slides) by exporting them
+    const googleWorkspaceMimeTypes = [
+      'application/vnd.google-apps.document',    // Google Docs
+      'application/vnd.google-apps.spreadsheet', // Google Sheets  
+      'application/vnd.google-apps.presentation' // Google Slides
+    ];
 
+    if (googleWorkspaceMimeTypes.includes(mimeType)) {
+      console.log(`Converting Google Workspace file "${originalName}" to PDF for AI processing`);
+      try {
+        blob = Drive.Files.export(fileId, 'application/pdf');
+        mimeType = 'application/pdf'; // Update MIME type for processing
+      } catch (exportError) {
+        console.error(`Failed to export Google Workspace file: ${exportError.message}`);
+        return { 
+          error: `Cannot process Google Workspace file "${originalName}". Export failed: ${exportError.message}`, 
+          confidence: "Error", 
+          previewData: previewData 
+        };
+      }
+    } else {
+      // Regular file - get blob directly
+      blob = file.getBlob();
+    }
 
-   // Prepare preview data for frontend
-   const commonOfficeMimeTypes = [
-     "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
-     "application/msword", // .doc
-     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-     "application/vnd.ms-excel", // .xls
-     "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
-     "application/vnd.ms-powerpoint" // .ppt
-   ];
+    // Validate blob
+    if (!blob) {
+      throw new Error(`Unable to obtain blob for file ${fileId}. File may be corrupted or inaccessible.`);
+    }
 
+    // Validate blob has required methods
+    if (typeof blob.getContentType !== 'function' || typeof blob.getBytes !== 'function') {
+      throw new Error(`Invalid blob object for file ${fileId}. Expected Blob but got: ${typeof blob}`);
+    }
 
-   if (mimeType.startsWith("image/")) {
-     base64Content = Utilities.base64Encode(blob.getBytes());
-     previewData = { type: 'image', content: `data:${mimeType};base64,${base64Content}` };
-   } else if (mimeType === "application/pdf") {
-     base64Content = Utilities.base64Encode(blob.getBytes());
-     previewData = { type: 'pdf', content: fileId }; // For PDF, we pass the fileId for direct embedding
-   } else if (commonOfficeMimeTypes.includes(mimeType)) {
-     previewData = { type: 'office', content: fileUrl };
-   }
+    // OCR for images and PDFs
+    if (mimeType.startsWith("image/") || mimeType === "application/pdf") {
+      try {
+        ocrText = extractTextWithOCR(fileId);
+        console.log(`OCR completed for "${originalName}". Text length: ${ocrText.length} characters`);
+      } catch (ocrError) {
+        console.warn(`OCR failed for "${originalName}": ${ocrError.message}. Continuing without OCR text.`);
+        ocrText = '';
+      }
+    }
 
+    // Prepare preview data for frontend
+    const commonOfficeMimeTypes = [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+      "application/msword", // .doc
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+      "application/vnd.ms-excel", // .xls
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
+      "application/vnd.ms-powerpoint" // .ppt
+    ];
 
-   // Call Gemini API, passing OCR text
-   const extractedInfo = callGeminiAPIInternal(blob, originalName, base64Content, ocrText);
+    if (mimeType.startsWith("image/")) {
+      base64Content = Utilities.base64Encode(blob.getBytes());
+      previewData = { type: 'image', content: `data:${mimeType};base64,${base64Content}` };
+    } else if (mimeType === "application/pdf") {
+      base64Content = Utilities.base64Encode(blob.getBytes());
+      previewData = { type: 'pdf', content: fileId }; // For PDF, we pass the fileId for direct embedding
+    } else if (commonOfficeMimeTypes.includes(mimeType)) {
+      previewData = { type: 'office', content: fileUrl };
+    }
 
+    // Call Gemini API, passing OCR text
+    console.log(`Calling Gemini API for file "${originalName}" with MIME type: ${mimeType}`);
+    const extractedInfo = callGeminiAPIInternal(blob, originalName, base64Content, ocrText);
 
-   if (extractedInfo.error) {
-     console.warn(`AI extraction for "${originalName}" returned an error: ${extractedInfo.error}`);
-     return { ...extractedInfo, previewData: previewData };
-   }
+    if (extractedInfo.error) {
+      console.warn(`AI extraction for "${originalName}" returned an error: ${extractedInfo.error}`);
+      return { ...extractedInfo, previewData: previewData };
+    }
 
+    // Enhanced validation of extracted data
+    const validatedInfo = validateAndCleanExtractedData(extractedInfo);
+    console.log("AI Extraction successful. Validated result:", validatedInfo);
+    return { ...validatedInfo, previewData: previewData };
 
-   // Enhanced validation of extracted data
-   const validatedInfo = validateAndCleanExtractedData(extractedInfo);
-   console.log("AI Extraction successful. Validated result:", validatedInfo);
-   return { ...validatedInfo, previewData: previewData };
-
-
- } catch (e) {
-   const errorMessage = `Error processing file ${fileId} with AI: ${e.message}`;
-   console.error(errorMessage);
-   return { error: `AI Processing failed for "${originalName}": ${e.message}`, confidence: "Error", previewData: previewData };
- }
+  } catch (e) {
+    const errorMessage = `Error processing file ${fileId} with AI: ${e.message}`;
+    console.error(errorMessage);
+    return { 
+      error: `AI Processing failed for "${originalName}": ${e.message}`, 
+      confidence: "Error", 
+      previewData: previewData 
+    };
+  }
 }
 
 
@@ -531,56 +585,66 @@ function sanitizeFilename(filename) {
 * @returns {Object} An object containing extracted data or an error message.
 */
 function callGeminiAPIInternal(fileBlob, fileName, preEncodedBase64, ocrText) {
- const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
- if (!apiKey) {
-   console.error("Gemini API Key not found in User Properties. Please set 'GEMINI_API_KEY' in Project Settings -> Script Properties.");
-   return { error: "API Key not configured. Please set GEMINI_API_KEY in Google Apps Script Properties.", confidence: "Error" };
- }
+  // Validate blob parameter first
+  if (!fileBlob) {
+    console.error(`No blob received for "${fileName}". Check that the ID is a real file and that the script has Drive access.`);
+    return { error: 'File blob is empty or inaccessible. Please ensure the file exists and the script has proper Drive permissions.', confidence: "Error" };
+  }
 
+  // Validate blob has required methods
+  if (typeof fileBlob.getContentType !== 'function') {
+    console.error(`Invalid blob object for "${fileName}". Expected Blob but got: ${typeof fileBlob}`);
+    return { error: 'Invalid file blob object. Please check file permissions and try again.', confidence: "Error" };
+  }
 
- const MOCK_AI_PROCESSING = false; // Set to true for testing without API calls
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) {
+    console.error("Gemini API Key not found in User Properties. Please set 'GEMINI_API_KEY' in Project Settings -> Script Properties.");
+    return { error: "API Key not configured. Please set GEMINI_API_KEY in Google Apps Script Properties.", confidence: "Error" };
+  }
 
+  const MOCK_AI_PROCESSING = false; // Set to true for testing without API calls
 
- if (MOCK_AI_PROCESSING) {
-   console.warn("Using MOCK AI Processing for file: %s", fileName);
-   Utilities.sleep(1500);
-   const randomSuffix = Math.floor(Math.random() * 100);
-   return {
-     date: `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
-     invoiceNumber: `INV-MOCK-${randomSuffix}`,
-     vendorName: `Mock Vendor ${String.fromCharCode(65 + randomSuffix % 26)}`,
-     amount: `${(Math.random() * 500 + 50).toFixed(2)}`,
-     invoiceStatus: ["inflow", "outflow", "unknown"][randomSuffix % 3],
-     confidence: ["High", "Medium", "Low"][randomSuffix % 3] + " (Mocked)"
-   };
- }
+  if (MOCK_AI_PROCESSING) {
+    console.warn("Using MOCK AI Processing for file: %s", fileName);
+    Utilities.sleep(1500);
+    const randomSuffix = Math.floor(Math.random() * 100);
+    return {
+      date: `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
+      invoiceNumber: `INV-MOCK-${randomSuffix}`,
+      vendorName: `Mock Vendor ${String.fromCharCode(65 + randomSuffix % 26)}`,
+      amount: `${(Math.random() * 500 + 50).toFixed(2)}`,
+      invoiceStatus: ["inflow", "outflow", "unknown"][randomSuffix % 3],
+      confidence: ["High", "Medium", "Low"][randomSuffix % 3] + " (Mocked)"
+    };
+  }
 
+  // --- ACTUAL GEMINI API CALL LOGIC ---
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_ID_AIS}:generateContent?key=${apiKey}`;
 
- // --- ACTUAL GEMINI API CALL LOGIC ---
- const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_ID_AIS}:generateContent?key=${apiKey}`;
+  try {
+    const mimeType = fileBlob.getContentType();
+    console.log(`Processing file "${fileName}" with MIME type: ${mimeType}`);
+    
+    const fileBytesBase64 = preEncodedBase64 || Utilities.base64Encode(fileBlob.getBytes());
 
-
- const mimeType = fileBlob.getContentType();
- const fileBytesBase64 = preEncodedBase64 || Utilities.base64Encode(fileBlob.getBytes());
-
-
- // Add OCR text to the prompt if available
- let promptText = `
+    // Add OCR text to the prompt if available
+    let promptText = `
 You are a document analysis AI system specialized in processing invoices and billing documents.
 Analyze the attached file (PDF or image) and extract the following key data fields accurately and consistently.
 `;
 
- if (ocrText && ocrText.length > 100) { // Only include if meaningful
-   promptText += `
+    if (ocrText && ocrText.length > 100) { // Only include if meaningful
+      promptText += `
 Here is the OCR-extracted text from the document (use this as your primary source if possible):
 
 ${ocrText}
 
 ---
 `;
- }
+    }
 
- promptText += `
+    promptText += `
  INVOICE DATA EXTRACTION INSTRUCTIONS
  
  Analyze the provided document(s) and extract invoice information. Handle both single and multiple invoice scenarios carefully.
@@ -747,135 +811,127 @@ ${ocrText}
  Now analyze the provided document and return the appropriate JSON response.
  `;
 
+    // Check supported file types for Gemini Vision model
+    if (!mimeType.startsWith("image/") && mimeType !== "application/pdf") {
+      console.error(`Unsupported MIME type for Gemini API: ${mimeType} for file ${fileName}.`);
+      return { error: `File type ${mimeType} is not supported by the AI model for analysis.`, confidence: "Error" };
+    }
 
+    const requestBody = {
+      "contents": [
+        {
+          "parts": [
+            { "text": promptText },
+            {
+              "inline_data": {
+                "mime_type": mimeType,
+                "data": fileBytesBase64
+              }
+            }
+          ]
+        }
+      ],
+      "generationConfig": {
+        "temperature": 0.1,
+        "maxOutputTokens": 2048,
+        "responseMimeType": "application/json"
+      }
+    };
 
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(requestBody),
+      'muteHttpExceptions': true,
+      'followRedirects': true
+    };
 
- // Check supported file types for Gemini Vision model
- if (!mimeType.startsWith("image/") && mimeType !== "application/pdf") {
-   console.error(`Unsupported MIME type for Gemini API: ${mimeType} for file ${fileName}.`);
-   return { error: `File type ${mimeType} is not supported by the AI model for analysis.`, confidence: "Error" };
- }
+    console.log(`Sending request to Gemini API for file: "${fileName}" (MIME: ${mimeType}).`);
 
+    try {
+      const response = UrlFetchApp.fetch(endpoint, options);
+      const responseCode = response.getResponseCode();
+      const responseBody = response.getContentText();
 
- const requestBody = {
-   "contents": [
-     {
-       "parts": [
-         { "text": promptText },
-         {
-           "inline_data": {
-             "mime_type": mimeType,
-             "data": fileBytesBase64
-           }
-         }
-       ]
-     }
-   ],
-   "generationConfig": {
-     "temperature": 0.1,
-     "maxOutputTokens": 2048,
-     "responseMimeType": "application/json"
-   }
- };
+      console.log(`Gemini API Response Code: ${responseCode}`);
 
+      if (responseCode === 200) {
+        console.log("Gemini API Raw Response (truncated):", responseBody.substring(0, 500) + "...");
 
- const options = {
-   'method': 'post',
-   'contentType': 'application/json',
-   'payload': JSON.stringify(requestBody),
-   'muteHttpExceptions': true,
-   'followRedirects': true
- };
+        let jsonResponse;
+        try {
+          jsonResponse = JSON.parse(responseBody);
+        } catch (e) {
+          throw new Error(`Failed to parse AI response as JSON. Raw response: ${responseBody.substring(0, 200)}... Error: ${e.message}`);
+        }
 
+        let parsedData = {};
+        if (jsonResponse.candidates && jsonResponse.candidates[0] &&
+            jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts &&
+            jsonResponse.candidates[0].content.parts[0]) {
 
- console.log(`Sending request to Gemini API for file: "${fileName}" (MIME: ${mimeType}).`);
+          const part = jsonResponse.candidates[0].content.parts[0];
+          if (part.text) {
+            try {
+              let cleanText = part.text.trim();
+              // Remove markdown code block fences if present
+              if (cleanText.startsWith('```json')) {
+                cleanText = cleanText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              } else if (cleanText.startsWith('```')) {
+                cleanText = cleanText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+              }
+              parsedData = JSON.parse(cleanText);
+            } catch (e) {
+              throw new Error(`AI returned text that was not valid JSON. Text: "${part.text.substring(0, 200)}...". Error: ${e.message}`);
+            }
+          } else if (Object.keys(part).length > 0) {
+            // If the part itself is a JSON object (e.g., if responseMimeType is set)
+            parsedData = part;
+          } else {
+            throw new Error("AI response candidate content structure is not recognized or is empty.");
+          }
 
+        } else {
+          throw new Error("Valid candidate with parsable content not found in AI response.");
+        }
 
- try {
-   const response = UrlFetchApp.fetch(endpoint, options);
-   const responseCode = response.getResponseCode();
-   const responseBody = response.getContentText();
+        // Ensure all expected keys are present, defaulting to "N/A" or "unknown"
+        return {
+          date: parsedData.date || "N/A",
+          invoiceNumber: parsedData.invoiceNumber || "N/A",
+          vendorName: parsedData.vendorName || "N/A",
+          amount: parsedData.amount || "N/A",
+          invoiceStatus: parsedData.invoiceStatus || "unknown",
+          confidence: "High (Gemini 2.0 Flash)",
+          numberofinvoices : parsedData.numberofinvoices
+        };
 
+      } else {
+        let errorMessage = `AI API request failed with status ${responseCode}.`;
+        try {
+          const errorJson = JSON.parse(responseBody);
+          if (errorJson.error && errorJson.error.message) {
+            errorMessage += ` Message: ${errorJson.error.message}`;
+          }
+        } catch (e) {
+          errorMessage += ` Raw response: ${responseBody.substring(0, 200)}...`;
+        }
+        console.error(`Gemini API Error: ${errorMessage}`);
+        return { error: errorMessage, confidence: "Error" };
+      }
 
-   console.log(`Gemini API Response Code: ${responseCode}`);
+    } catch (apiError) {
+      console.error("Critical error during Gemini API call: %s", apiError.message);
+      return { error: `An unexpected error occurred during AI processing: ${apiError.message}`, confidence: "Error" };
+    }
 
-
-   if (responseCode === 200) {
-     console.log("Gemini API Raw Response (truncated):", responseBody.substring(0, 500) + "...");
-
-
-     let jsonResponse;
-     try {
-       jsonResponse = JSON.parse(responseBody);
-     } catch (e) {
-       throw new Error(`Failed to parse AI response as JSON. Raw response: ${responseBody.substring(0, 200)}... Error: ${e.message}`);
-     }
-
-
-     let parsedData = {};
-     if (jsonResponse.candidates && jsonResponse.candidates[0] &&
-         jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts &&
-         jsonResponse.candidates[0].content.parts[0]) {
-
-
-       const part = jsonResponse.candidates[0].content.parts[0];
-       if (part.text) {
-         try {
-           let cleanText = part.text.trim();
-           // Remove markdown code block fences if present
-           if (cleanText.startsWith('```json')) {
-             cleanText = cleanText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-           } else if (cleanText.startsWith('```')) {
-             cleanText = cleanText.replace(/^```\s*/, '').replace(/\s*```$/, '');
-           }
-           parsedData = JSON.parse(cleanText);
-         } catch (e) {
-           throw new Error(`AI returned text that was not valid JSON. Text: "${part.text.substring(0, 200)}...". Error: ${e.message}`);
-         }
-       } else if (Object.keys(part).length > 0) {
-         // If the part itself is a JSON object (e.g., if responseMimeType is set)
-         parsedData = part;
-       } else {
-         throw new Error("AI response candidate content structure is not recognized or is empty.");
-       }
-
-
-     } else {
-       throw new Error("Valid candidate with parsable content not found in AI response.");
-     }
-
-
-     // Ensure all expected keys are present, defaulting to "N/A" or "unknown"
-     return {
-       date: parsedData.date || "N/A",
-       invoiceNumber: parsedData.invoiceNumber || "N/A",
-       vendorName: parsedData.vendorName || "N/A",
-       amount: parsedData.amount || "N/A",
-       invoiceStatus: parsedData.invoiceStatus || "unknown",
-       confidence: "High (Gemini 2.0 Flash)",
-       numberofinvoices : parsedData.numberofinvoices
-     };
-
-
-   } else {
-     let errorMessage = `AI API request failed with status ${responseCode}.`;
-     try {
-       const errorJson = JSON.parse(responseBody);
-       if (errorJson.error && errorJson.error.message) {
-         errorMessage += ` Message: ${errorJson.error.message}`;
-       }
-     } catch (e) {
-       errorMessage += ` Raw response: ${responseBody.substring(0, 200)}...`;
-     }
-     console.error(`Gemini API Error: ${errorMessage}`);
-     return { error: errorMessage, confidence: "Error" };
-   }
-
-
- } catch (apiError) {
-   console.error("Critical error during Gemini API call: %s", apiError.message);
-   return { error: `An unexpected error occurred during AI processing: ${apiError.message}`, confidence: "Error" };
- }
+  } catch (error) {
+    console.error(`Error in callGeminiAPIInternal for ${fileName}:`, error);
+    return { 
+      error: `AI processing failed: ${error.message}`, 
+      confidence: "Error" 
+    };
+  }
 }
 
 
@@ -1011,5 +1067,184 @@ function extractTextWithOCR(fileId) {
     return text;
   } catch (e) {
     return '';
+  }
+}
+
+/**
+* Debug function to check spreadsheet for file ID issues
+* @param {string} sheetName The sheet name to check
+* @returns {Object} Debug information about the spreadsheet
+*/
+function debugSpreadsheetFileIds(sheetName) {
+  console.log(`Debugging file IDs in sheet: "${sheetName}"`);
+  
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) {
+      return { error: `Sheet "${sheetName}" not found` };
+    }
+    
+    const lastRow = sheet.getLastRow();
+    console.log(`Sheet has ${lastRow} rows`);
+    
+    if (lastRow < 2) {
+      return { error: "Sheet has no data rows (only header or empty)" };
+    }
+    
+    // Get all data from columns A, B, C
+    const dataRange = sheet.getRange("A2:C" + lastRow);
+    const values = dataRange.getValues();
+    
+    const results = {
+      totalRows: values.length,
+      validFileIds: [],
+      invalidFileIds: [],
+      emptyRows: [],
+      errors: []
+    };
+    
+    for (let i = 0; i < values.length; i++) {
+      const rowNumber = i + 2;
+      const fileName = values[i][0];
+      const fileId = values[i][1];
+      const fileUrl = values[i][2];
+      
+      console.log(`Row ${rowNumber}: FileName="${fileName}", FileID="${fileId}", FileURL="${fileUrl}"`);
+      
+      // Check if file ID is empty or invalid
+      if (!fileId || typeof fileId !== 'string' || fileId.trim() === '') {
+        results.emptyRows.push({
+          row: rowNumber,
+          fileName: fileName,
+          fileId: fileId,
+          fileUrl: fileUrl
+        });
+        continue;
+      }
+      
+      // Test if file ID is valid
+      try {
+        const file = DriveApp.getFileById(fileId.trim());
+        const actualFileName = file.getName();
+        
+        results.validFileIds.push({
+          row: rowNumber,
+          sheetFileName: fileName,
+          actualFileName: actualFileName,
+          fileId: fileId.trim(),
+          fileUrl: fileUrl,
+          mimeType: file.getMimeType()
+        });
+        
+        console.log(`✓ Row ${rowNumber}: Valid file "${actualFileName}"`);
+        
+      } catch (error) {
+        results.invalidFileIds.push({
+          row: rowNumber,
+          fileName: fileName,
+          fileId: fileId.trim(),
+          fileUrl: fileUrl,
+          error: error.message
+        });
+        
+        console.log(`✗ Row ${rowNumber}: Invalid file ID "${fileId}" - ${error.message}`);
+      }
+    }
+    
+    console.log(`Debug Results:`);
+    console.log(`- Total rows: ${results.totalRows}`);
+    console.log(`- Valid file IDs: ${results.validFileIds.length}`);
+    console.log(`- Invalid file IDs: ${results.invalidFileIds.length}`);
+    console.log(`- Empty rows: ${results.emptyRows.length}`);
+    
+    return results;
+    
+  } catch (error) {
+    console.error(`Error debugging spreadsheet: ${error.message}`);
+    return { error: `Debug failed: ${error.message}` };
+  }
+}
+
+/**
+* Test function with a sample file ID for demonstration
+* Replace the fileId below with a real file ID from your spreadsheet
+* @returns {Object} Test results
+*/
+function testWithSampleFile() {
+  // Replace this with a real file ID from your spreadsheet (Column B)
+  const sampleFileId = "1ABC123DEF456"; // ← REPLACE WITH REAL FILE ID
+  
+  console.log("Testing with sample file ID:", sampleFileId);
+  return testFileAccess(sampleFileId);
+}
+
+/**
+* Test function to debug file access issues
+* @param {string} fileId The file ID to test
+* @returns {Object} Test results
+*/
+function testFileAccess(fileId) {
+  console.log(`Testing file access for ID: ${fileId}`);
+  
+  try {
+    // Test 1: Basic file access
+    const file = DriveApp.getFileById(fileId);
+    console.log(`✓ File found: "${file.getName()}"`);
+    
+    // Test 2: Get blob
+    const blob = file.getBlob();
+    if (!blob) {
+      console.log(`✗ getBlob() returned null/undefined`);
+      return { success: false, error: 'getBlob() returned null/undefined' };
+    }
+    
+    // Test 3: Check blob methods
+    if (typeof blob.getContentType !== 'function') {
+      console.log(`✗ blob.getContentType is not a function`);
+      return { success: false, error: 'blob.getContentType is not a function' };
+    }
+    
+    if (typeof blob.getBytes !== 'function') {
+      console.log(`✗ blob.getBytes is not a function`);
+      return { success: false, error: 'blob.getBytes is not a function' };
+    }
+    
+    // Test 4: Get content type
+    const mimeType = blob.getContentType();
+    console.log(`✓ MIME type: ${mimeType}`);
+    
+    // Test 5: Get bytes
+    const bytes = blob.getBytes();
+    console.log(`✓ Bytes length: ${bytes.length}`);
+    
+    // Test 6: Check if it's a Google Workspace file
+    const googleWorkspaceMimeTypes = [
+      'application/vnd.google-apps.document',
+      'application/vnd.google-apps.spreadsheet', 
+      'application/vnd.google-apps.presentation'
+    ];
+    
+    if (googleWorkspaceMimeTypes.includes(mimeType)) {
+      console.log(`⚠ File is Google Workspace type: ${mimeType}`);
+      try {
+        const exportedBlob = Drive.Files.export(fileId, 'application/pdf');
+        console.log(`✓ Export successful, exported blob size: ${exportedBlob.getBytes().length}`);
+      } catch (exportError) {
+        console.log(`✗ Export failed: ${exportError.message}`);
+        return { success: false, error: `Export failed: ${exportError.message}` };
+      }
+    }
+    
+    console.log(`✓ All tests passed for file: "${file.getName()}"`);
+    return { 
+      success: true, 
+      fileName: file.getName(),
+      mimeType: mimeType,
+      fileSize: bytes.length
+    };
+    
+  } catch (error) {
+    console.log(`✗ Test failed: ${error.message}`);
+    return { success: false, error: error.message };
   }
 }
